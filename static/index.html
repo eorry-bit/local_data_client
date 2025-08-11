@@ -475,9 +475,11 @@
                     </div>
                     
                     <button class="btn" onclick="loadData()">查询数据</button>
+                    <button class="btn" onclick="loadDataStream()" style="background-color: #4CAF50;">流式加载</button>
                     <button class="btn" onclick="clearChart()">清空图表</button>
                     <button class="btn" onclick="exportToExcel()" id="exportBtn" disabled>导出Excel</button>
                     <button class="btn" onclick="showReferenceValueModal()">设置参考值</button>
+                    <button class="btn" onclick="showDataOperationsModal()">数据操作管理</button>
                 </div>
             </div>
         </div>
@@ -512,6 +514,7 @@
             <div id="loading" class="loading" style="display: none;">
                 <span class="loading-spinner"></span>正在加载数据...
             </div>
+            <div id="info" class="info" style="display: none; background-color: #d4edda; color: #155724; padding: 10px; margin: 10px 0; border-radius: 4px;"></div>
             <div id="error" class="error" style="display: none;"></div>
         </div>
     </div>
@@ -560,6 +563,94 @@
             <div class="modal-footer">
                 <button class="btn" onclick="saveTimeRanges()">保存</button>
                 <button class="btn" onclick="hideTimeRangeModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据操作管理模态框 -->
+    <div id="dataOperationsModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h3>数据操作管理</h3>
+                <span class="close" onclick="hideDataOperationsModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 20px;">
+                    <button class="btn btn-primary" onclick="showAddOperationForm()">新增操作</button>
+                    <button class="btn" onclick="refreshOperationsList()">刷新列表</button>
+                    <button class="btn" onclick="exportOperations()">导出操作</button>
+                    <button class="btn" onclick="showImportDialog()">导入操作</button>
+                    <input type="file" id="importFile" style="display: none;" accept=".json" onchange="handleImportFile(event)" multiple>
+                </div>
+                
+                <!-- 快速添加操作表单 -->
+                <div id="quickAddForm" style="background: #f0f8ff; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <select id="quickTarget" style="width: 150px;">
+                            <option value="">标靶</option>
+                        </select>
+                        <select id="quickKey" style="width: 120px;">
+                            <option value="">指标</option>
+                        </select>
+                        <select id="quickOperation" style="width: 60px;">
+                            <option value="add">+</option>
+                            <option value="subtract">-</option>
+                            <option value="multiply">×</option>
+                            <option value="divide">÷</option>
+                        </select>
+                        <input type="number" id="quickValue" step="any" placeholder="数值" style="width: 80px;">
+                        <button class="btn btn-primary" onclick="quickAddOperation()" style="padding: 5px 15px;">快速添加</button>
+                        <button class="btn" onclick="toggleAdvancedForm()" style="padding: 5px 10px;">高级选项</button>
+                    </div>
+                </div>
+                
+                <!-- 高级选项表单（默认隐藏） -->
+                <div id="advancedForm" style="display: none; background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h4 id="operationFormTitle">高级设置</h4>
+                    <input type="hidden" id="operationId">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label>自定义名称 (可选):</label>
+                            <input type="text" id="operationName" placeholder="留空则自动生成" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label>描述 (可选):</label>
+                            <input type="text" id="operationDescription" placeholder="可选描述" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label>开始时间 (可选):</label>
+                            <input type="datetime-local" id="operationStartTime" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label>结束时间 (可选):</label>
+                            <input type="datetime-local" id="operationEndTime" style="width: 100%;">
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <button class="btn btn-primary" onclick="saveAdvancedOperation()">保存</button>
+                        <button class="btn" onclick="hideAdvancedForm()">取消</button>
+                    </div>
+                </div>
+                
+                <!-- 操作列表 -->
+                <div id="operationsList">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                        <thead>
+                            <tr style="background: #f5f5f5;">
+                                <th style="padding: 8px 5px; text-align: center; border-bottom: 2px solid #ddd; width: 40px;">启用</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">操作</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">标靶</th>
+                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">指标</th>
+                                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #ddd; width: 120px;">快捷操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="operationsTableBody">
+                            <tr>
+                                <td colspan="5" style="padding: 20px; text-align: center; color: #999;">正在加载...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>

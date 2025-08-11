@@ -277,7 +277,7 @@ function initializeChart() {
             hoverformat: '%Y/%m/%d %H:%M:%S'
         },
         yaxis: {
-            title: '数值'
+            title: '位移（mm）'
         },
         hovermode: 'x unified',
         showlegend: true,
@@ -407,6 +407,107 @@ async function loadData() {
     }
 }
 
+// 流式加载数据（用于大数据量）
+async function loadDataStream() {
+    const assetName = document.getElementById('assetSelect').value;
+    const deviceName = document.getElementById('deviceSelect').value;
+    const startTime = document.getElementById('startTime').value;
+    const endTime = document.getElementById('endTime').value;
+    const removeOutliers = document.getElementById('removeOutliers').checked;
+    const outlierMethod = document.getElementById('outlierMethod').value;
+    const enablePerformanceMode = document.getElementById('enablePerformanceMode').checked;
+    const dataLimit = document.getElementById('dataLimit').value;
+    
+    // 获取选中的标靶和数据类型
+    const selectedTargets = [];
+    const targetCheckboxes = document.querySelectorAll('#targetCheckboxes input[type="checkbox"]:checked');
+    targetCheckboxes.forEach(checkbox => {
+        selectedTargets.push(checkbox.value);
+    });
+    
+    const selectedKeyNames = [];
+    const keyNameCheckboxes = document.querySelectorAll('#keyNameCheckboxes input[type="checkbox"]:checked');
+    keyNameCheckboxes.forEach(checkbox => {
+        selectedKeyNames.push(checkbox.value);
+    });
+    
+    if (selectedTargets.length === 0 || selectedKeyNames.length === 0) {
+        showError('请至少选择一个标靶和一个数据类型');
+        return;
+    }
+    
+    // 构建查询参数
+    const params = new URLSearchParams();
+    if (assetName) params.append('asset_name', assetName);
+    if (deviceName) params.append('device_name', deviceName);
+    params.append('target_names', selectedTargets.join(','));
+    params.append('key_names', selectedKeyNames.join(','));
+    if (startTime) params.append('start_time', new Date(startTime).toISOString());
+    if (endTime) params.append('end_time', new Date(endTime).toISOString());
+    if (removeOutliers) {
+        params.append('remove_outliers', 'true');
+        params.append('outlier_method', outlierMethod);
+    }
+    if (enablePerformanceMode && dataLimit) {
+        params.append('limit', dataLimit);
+    }
+    
+    showLoading(true);
+    currentData = [];
+    let loadedCount = 0;
+    
+    try {
+        // 使用EventSource进行流式接收
+        const eventSource = new EventSource('/api/telemetry/stream?' + params.toString());
+        
+        eventSource.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            
+            if (message.type === 'data') {
+                // 接收到数据项
+                currentData.push(message.item);
+                loadedCount++;
+                
+                // 每接收100条数据更新一次图表
+                if (loadedCount % 100 === 0) {
+                    updateChart();
+                    showLoadingProgress(`已加载 ${loadedCount} 条数据...`);
+                }
+            } else if (message.type === 'progress') {
+                // 更新进度
+                showLoadingProgress(`已加载 ${message.loaded} 条数据...`);
+            } else if (message.type === 'stats') {
+                // 接收完成，显示统计信息
+                eventSource.close();
+                showLoading(false);
+                updateChart();
+                updateExportButton();
+                
+                if (message.limited) {
+                    showInfo(`已加载 ${message.total} 条数据（达到限制）`);
+                } else {
+                    showInfo(`加载完成，共 ${message.total} 条数据`);
+                }
+            } else if (message.type === 'error') {
+                // 处理错误
+                eventSource.close();
+                showLoading(false);
+                showError('加载数据失败: ' + message.message);
+            }
+        };
+        
+        eventSource.onerror = function(error) {
+            eventSource.close();
+            showLoading(false);
+            showError('流式加载失败，请尝试普通加载模式');
+        };
+        
+    } catch (error) {
+        showLoading(false);
+        showError('流式加载失败: ' + error.message);
+    }
+}
+
 // 更新图表
 function updateChart() {
     if (currentData.length === 0) {
@@ -428,7 +529,7 @@ function updateChart() {
                 marker: { size: 4 },
                 hovertemplate: '<b>%{fullData.name}</b><br>' +
                               '时间: %{x|%Y/%m/%d %H:%M:%S}<br>' +
-                              '数值: %{y}<br>' +
+                              '位移（mm）: %{y}<br>' +
                               '<extra></extra>'
             };
         }
@@ -450,7 +551,7 @@ function updateChart() {
             hoverformat: '%Y/%m/%d %H:%M:%S'
         },
         yaxis: {
-            title: '数值'
+            title: '位移（mm）'
         },
         hovermode: 'x unified',
         showlegend: true,
@@ -493,7 +594,7 @@ function exportToExcel() {
             '设备名称': item.device_name,
             '标靶名称': item.target_name,
             '数据类型': item.key_name,
-            '数值': item.value
+            '位移（mm）': item.value
         }));
 
         // 创建数据透视表
@@ -657,10 +758,10 @@ function createSummaryTable(data) {
         { '统计项': '时间跨度', '值': `${timeSpan.toFixed(1)} 小时` },
         { '统计项': '开始时间', '值': formatDateForExcel(minTime) },
         { '统计项': '结束时间', '值': formatDateForExcel(maxTime) },
-        { '统计项': '数值平均值', '值': avg.toFixed(3) },
-        { '统计项': '数值最大值', '值': max },
-        { '统计项': '数值最小值', '值': min },
-        { '统计项': '数值范围', '值': (max - min).toFixed(3) }
+        { '统计项': '位移（mm）平均值', '值': avg.toFixed(3) },
+        { '统计项': '位移（mm）最大值', '值': max },
+        { '统计项': '位移（mm）最小值', '值': min },
+        { '统计项': '位移（mm）范围', '值': (max - min).toFixed(3) }
     ];
 }
 
@@ -730,6 +831,26 @@ function hideDataStats() {
 // 显示/隐藏加载状态
 function showLoading(show) {
     document.getElementById('loading').style.display = show ? 'block' : 'none';
+}
+
+// 显示加载进度
+function showLoadingProgress(message) {
+    const loadingDiv = document.getElementById('loading');
+    if (loadingDiv.style.display === 'block') {
+        loadingDiv.textContent = message;
+    }
+}
+
+// 显示信息提示
+function showInfo(message) {
+    const infoDiv = document.getElementById('info');
+    if (infoDiv) {
+        infoDiv.textContent = message;
+        infoDiv.style.display = 'block';
+        setTimeout(() => {
+            infoDiv.style.display = 'none';
+        }, 5000);
+    }
 }
 
 // 显示错误信息
@@ -991,3 +1112,638 @@ document.addEventListener('DOMContentLoaded', function() {
     loadReferenceValues();
     loadTimeRanges();
 });
+
+// 数据操作管理功能
+let dataOperations = [];
+let editingOperationId = null;
+
+function showDataOperationsModal() {
+    document.getElementById('dataOperationsModal').style.display = 'block';
+    populateQuickSelects();
+    refreshOperationsList();
+}
+
+// 显示新增操作表单
+function showAddOperationForm() {
+    editingOperationId = null;
+    document.getElementById('operationFormTitle').textContent = '新增数据操作';
+    document.getElementById('operationId').value = '';
+    document.getElementById('operationName').value = '';
+    document.getElementById('operationDescription').value = '';
+    document.getElementById('operationType').value = 'add';
+    document.getElementById('operationValue').value = '';
+    document.getElementById('operationStartTime').value = '';
+    document.getElementById('operationEndTime').value = '';
+    
+    // 填充选择器
+    populateOperationSelects();
+    
+    // 清空选择
+    document.getElementById('operationTarget').value = '';
+    document.getElementById('operationKey').value = '';
+    
+    // 显示表单
+    document.getElementById('operationForm').style.display = 'block';
+}
+
+function hideDataOperationsModal() {
+    document.getElementById('dataOperationsModal').style.display = 'none';
+    hideAdvancedForm();
+}
+
+function toggleAdvancedForm() {
+    const form = document.getElementById('advancedForm');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+}
+
+function hideAdvancedForm() {
+    document.getElementById('advancedForm').style.display = 'none';
+    document.getElementById('operationId').value = '';
+    document.getElementById('operationName').value = '';
+    document.getElementById('operationDescription').value = '';
+    document.getElementById('operationStartTime').value = '';
+    document.getElementById('operationEndTime').value = '';
+}
+
+function populateQuickSelects() {
+    // 填充快速添加的选择器
+    const targetSelect = document.getElementById('quickTarget');
+    const keySelect = document.getElementById('quickKey');
+    
+    targetSelect.innerHTML = '<option value="">选择标靶</option>';
+    if (filterOptions.targets) {
+        filterOptions.targets.forEach(target => {
+            const option = document.createElement('option');
+            option.value = target;
+            option.textContent = target;
+            targetSelect.appendChild(option);
+        });
+    }
+    
+    keySelect.innerHTML = '<option value="">选择指标</option>';
+    if (filterOptions.key_names) {
+        filterOptions.key_names.forEach(key => {
+            const option = document.createElement('option');
+            option.value = key;
+            option.textContent = key;
+            keySelect.appendChild(option);
+        });
+    }
+}
+
+// 快速添加操作
+async function quickAddOperation() {
+    const targetName = document.getElementById('quickTarget').value;
+    const keyName = document.getElementById('quickKey').value;
+    const operationType = document.getElementById('quickOperation').value;
+    const value = parseFloat(document.getElementById('quickValue').value);
+    
+    if (!targetName || !keyName || isNaN(value)) {
+        showError('请填写必要字段');
+        return;
+    }
+    
+    const operationData = {
+        name: null,  // 自动生成
+        description: null,
+        target_name: targetName,
+        key_name: keyName,
+        operation_type: operationType,
+        value,
+        start_time: null,
+        end_time: null
+    };
+    
+    try {
+        const response = await fetch('/api/operations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(operationData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // 清空快速添加表单
+            document.getElementById('quickValue').value = '';
+            refreshOperationsList();
+            showSuccess('操作添加成功');
+        } else {
+            showError('添加失败: ' + result.error);
+        }
+    } catch (error) {
+        showError('添加失败: ' + error.message);
+    }
+}
+
+// 保存高级设置的操作
+async function saveAdvancedOperation() {
+    const targetName = document.getElementById('quickTarget').value;
+    const keyName = document.getElementById('quickKey').value;
+    const operationType = document.getElementById('quickOperation').value;
+    const value = parseFloat(document.getElementById('quickValue').value);
+    
+    const name = document.getElementById('operationName').value.trim() || null;
+    const description = document.getElementById('operationDescription').value.trim() || null;
+    const startTime = document.getElementById('operationStartTime').value;
+    const endTime = document.getElementById('operationEndTime').value;
+    
+    if (!targetName || !keyName || isNaN(value)) {
+        showError('请填写必要字段');
+        return;
+    }
+    
+    const operationData = {
+        name,
+        description,
+        target_name: targetName,
+        key_name: keyName,
+        operation_type: operationType,
+        value,
+        start_time: startTime ? new Date(startTime).toISOString() : null,
+        end_time: endTime ? new Date(endTime).toISOString() : null
+    };
+    
+    try {
+        const editId = document.getElementById('operationId').value;
+        let response;
+        
+        if (editId) {
+            // 更新操作
+            operationData.id = parseInt(editId);  // 添加id字段
+            operationData.is_active = true;
+            response = await fetch(`/api/operations/${editId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(operationData)
+            });
+        } else {
+            // 创建新操作
+            response = await fetch('/api/operations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(operationData)
+            });
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            hideAdvancedForm();
+            refreshOperationsList();
+            showSuccess(editId ? '操作更新成功' : '操作创建成功');
+        } else {
+            showError('保存失败: ' + result.error);
+        }
+    } catch (error) {
+        showError('保存失败: ' + error.message);
+    }
+}
+
+function populateOperationSelects() {
+    // 填充标靶选择器
+    const targetSelect = document.getElementById('operationTarget');
+    targetSelect.innerHTML = '<option value="">请选择标靶...</option>';
+    if (filterOptions.targets) {
+        filterOptions.targets.forEach(target => {
+            const option = document.createElement('option');
+            option.value = target;
+            option.textContent = target;
+            targetSelect.appendChild(option);
+        });
+    }
+    
+    // 填充指标选择器
+    const keySelect = document.getElementById('operationKey');
+    keySelect.innerHTML = '<option value="">请选择指标...</option>';
+    if (filterOptions.key_names) {
+        filterOptions.key_names.forEach(key => {
+            const option = document.createElement('option');
+            option.value = key;
+            option.textContent = key;
+            keySelect.appendChild(option);
+        });
+    }
+}
+
+async function refreshOperationsList() {
+    try {
+        const response = await fetch('/api/operations');
+        const result = await response.json();
+        
+        if (result.success) {
+            dataOperations = result.data;
+            renderOperationsList();
+        } else {
+            showError('获取操作列表失败: ' + result.error);
+        }
+    } catch (error) {
+        showError('获取操作列表失败: ' + error.message);
+    }
+}
+
+function renderOperationsList() {
+    const tbody = document.getElementById('operationsTableBody');
+    
+    if (dataOperations.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center; color: #999;">暂无数据操作记录</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = dataOperations.map(op => {
+        const operationSymbol = {
+            'Add': '+',
+            'Subtract': '-',
+            'Multiply': '×',
+            'Divide': '÷'
+        }[op.operation_type] || '?';
+        
+        // 生成操作描述（紧凑显示）
+        const displayName = op.name || `${op.key_name} ${operationSymbol} ${op.value}`;
+        const hasTimeRange = op.start_time || op.end_time;
+        const timeIndicator = hasTimeRange ? ' 📅' : '';
+        
+        return `
+            <tr style="${!op.is_active ? 'opacity: 0.5;' : ''}">
+                <td style="padding: 6px; border-bottom: 1px solid #eee; text-align: center;">
+                    <input type="checkbox" ${op.is_active ? 'checked' : ''} 
+                           onchange="toggleOperation(${op.id})"
+                           title="${op.is_active ? '点击停用' : '点击启用'}">
+                </td>
+                <td style="padding: 6px; border-bottom: 1px solid #eee;">
+                    <strong>${displayName}</strong>${timeIndicator}
+                    ${op.description ? `<br><small style="color: #666;">${op.description}</small>` : ''}
+                </td>
+                <td style="padding: 6px; border-bottom: 1px solid #eee;">${op.target_name}</td>
+                <td style="padding: 6px; border-bottom: 1px solid #eee;">
+                    ${op.key_name} <span style="font-weight: bold;">${operationSymbol}</span> ${op.value}
+                </td>
+                <td style="padding: 6px; border-bottom: 1px solid #eee; text-align: center;">
+                    <button class="btn btn-sm" onclick="quickEditOperation(${op.id})" style="padding: 2px 8px; font-size: 12px;" title="编辑">✏️</button>
+                    <button class="btn btn-sm" onclick="deleteOperation(${op.id})" style="padding: 2px 8px; font-size: 12px; background: #dc3545; color: white;" title="删除">🗑️</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// 快速编辑操作
+function quickEditOperation(id) {
+    const operation = dataOperations.find(op => op.id === id);
+    if (!operation) return;
+    
+    // 填充快速编辑表单
+    document.getElementById('quickTarget').value = operation.target_name;
+    document.getElementById('quickKey').value = operation.key_name;
+    document.getElementById('quickOperation').value = operation.operation_type.toLowerCase();
+    document.getElementById('quickValue').value = operation.value;
+    
+    // 如果有高级设置，填充并显示高级表单
+    if (operation.name || operation.description || operation.start_time || operation.end_time) {
+        document.getElementById('operationId').value = id;
+        document.getElementById('operationName').value = operation.name || '';
+        document.getElementById('operationDescription').value = operation.description || '';
+        
+        if (operation.start_time) {
+            const startDate = new Date(operation.start_time);
+            // 格式化为本地时间
+            const year = startDate.getFullYear();
+            const month = String(startDate.getMonth() + 1).padStart(2, '0');
+            const day = String(startDate.getDate()).padStart(2, '0');
+            const hours = String(startDate.getHours()).padStart(2, '0');
+            const minutes = String(startDate.getMinutes()).padStart(2, '0');
+            document.getElementById('operationStartTime').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+        } else {
+            document.getElementById('operationStartTime').value = '';
+        }
+        
+        if (operation.end_time) {
+            const endDate = new Date(operation.end_time);
+            const year = endDate.getFullYear();
+            const month = String(endDate.getMonth() + 1).padStart(2, '0');
+            const day = String(endDate.getDate()).padStart(2, '0');
+            const hours = String(endDate.getHours()).padStart(2, '0');
+            const minutes = String(endDate.getMinutes()).padStart(2, '0');
+            document.getElementById('operationEndTime').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+        } else {
+            document.getElementById('operationEndTime').value = '';
+        }
+        
+        document.getElementById('advancedForm').style.display = 'block';
+    }
+}
+
+function formatTimeRange(startTime, endTime) {
+    if (!startTime && !endTime) {
+        return '全时段';
+    }
+    
+    const formatDate = (dateStr) => {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        return date.toLocaleString('zh-CN', { 
+            year: 'numeric', 
+            month: '2-digit', 
+            day: '2-digit', 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+    };
+    
+    if (startTime && endTime) {
+        return `${formatDate(startTime)} 至 ${formatDate(endTime)}`;
+    } else if (startTime) {
+        return `从 ${formatDate(startTime)} 开始`;
+    } else {
+        return `至 ${formatDate(endTime)}`;
+    }
+}
+
+async function saveOperation() {
+    const name = document.getElementById('operationName').value.trim();
+    const description = document.getElementById('operationDescription').value.trim();
+    const targetName = document.getElementById('operationTarget').value;
+    const keyName = document.getElementById('operationKey').value;
+    const operationType = document.getElementById('operationType').value;
+    const value = parseFloat(document.getElementById('operationValue').value);
+    const startTime = document.getElementById('operationStartTime').value;
+    const endTime = document.getElementById('operationEndTime').value;
+    
+    // 验证必填字段
+    if (!name || !targetName || !keyName || isNaN(value)) {
+        showError('请填写所有必填字段');
+        return;
+    }
+    
+    const operationData = {
+        name,
+        description: description || null,
+        target_name: targetName,
+        key_name: keyName,
+        operation_type: operationType,
+        value,
+        start_time: startTime ? new Date(startTime).toISOString() : null,
+        end_time: endTime ? new Date(endTime).toISOString() : null
+    };
+    
+    try {
+        let response;
+        if (editingOperationId) {
+            // 更新操作
+            operationData.id = editingOperationId;
+            operationData.is_active = true; // 默认激活
+            response = await fetch(`/api/operations/${editingOperationId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(operationData)
+            });
+        } else {
+            // 创建新操作
+            response = await fetch('/api/operations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(operationData)
+            });
+        }
+        
+        // 先检查响应是否正常
+        if (!response.ok) {
+            const text = await response.text();
+            console.error('响应错误:', response.status, text);
+            showError(`保存失败: HTTP ${response.status}`);
+            return;
+        }
+        
+        // 获取响应文本
+        const responseText = await response.text();
+        console.log('服务器响应:', responseText);
+        
+        // 尝试解析JSON
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch (jsonError) {
+            console.error('JSON解析失败:', responseText);
+            showError('保存失败: 服务器返回了无效的JSON格式');
+            return;
+        }
+        
+        if (result.success) {
+            showSuccess(editingOperationId ? '操作更新成功' : '操作创建成功');
+            hideOperationForm();
+            refreshOperationsList();
+        } else {
+            showError('保存失败: ' + result.error);
+        }
+    } catch (error) {
+        console.error('保存操作失败:', error);
+        showError('保存失败: ' + error.message);
+    }
+}
+
+async function editOperation(id) {
+    const operation = dataOperations.find(op => op.id === id);
+    if (!operation) return;
+    
+    editingOperationId = id;
+    document.getElementById('operationFormTitle').textContent = '编辑数据操作';
+    document.getElementById('operationId').value = id;
+    document.getElementById('operationName').value = operation.name;
+    document.getElementById('operationDescription').value = operation.description || '';
+    document.getElementById('operationType').value = operation.operation_type;
+    document.getElementById('operationValue').value = operation.value;
+    
+    // 填充选择器
+    populateOperationSelects();
+    
+    // 设置选中的值
+    document.getElementById('operationTarget').value = operation.target_name;
+    document.getElementById('operationKey').value = operation.key_name;
+    
+    // 设置时间（后端已经返回上海时间，直接使用）
+    if (operation.start_time) {
+        // 后端返回的是 "2025-08-11T10:00:00+08:00" 格式
+        // 直接解析并格式化为datetime-local需要的格式
+        const startDate = new Date(operation.start_time);
+        // 获取年月日时分，格式化为 YYYY-MM-DDTHH:mm
+        const year = startDate.getFullYear();
+        const month = String(startDate.getMonth() + 1).padStart(2, '0');
+        const day = String(startDate.getDate()).padStart(2, '0');
+        const hours = String(startDate.getHours()).padStart(2, '0');
+        const minutes = String(startDate.getMinutes()).padStart(2, '0');
+        document.getElementById('operationStartTime').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+    } else {
+        document.getElementById('operationStartTime').value = '';
+    }
+    
+    if (operation.end_time) {
+        const endDate = new Date(operation.end_time);
+        const year = endDate.getFullYear();
+        const month = String(endDate.getMonth() + 1).padStart(2, '0');
+        const day = String(endDate.getDate()).padStart(2, '0');
+        const hours = String(endDate.getHours()).padStart(2, '0');
+        const minutes = String(endDate.getMinutes()).padStart(2, '0');
+        document.getElementById('operationEndTime').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+    } else {
+        document.getElementById('operationEndTime').value = '';
+    }
+    
+    document.getElementById('operationForm').style.display = 'block';
+}
+
+async function deleteOperation(id) {
+    if (!confirm('确定要删除这个操作吗？')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/operations/${id}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess('操作删除成功');
+            refreshOperationsList();
+        } else {
+            showError('删除失败: ' + result.error);
+        }
+    } catch (error) {
+        showError('删除失败: ' + error.message);
+    }
+}
+
+async function toggleOperation(id) {
+    try {
+        const response = await fetch(`/api/operations/${id}/toggle`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess('操作状态已更新');
+            refreshOperationsList();
+        } else {
+            showError('更新失败: ' + result.error);
+        }
+    } catch (error) {
+        showError('更新失败: ' + error.message);
+    }
+}
+
+function showSuccess(message) {
+    // 可以实现一个简单的成功提示
+    console.log('Success:', message);
+    alert(message);
+}
+
+function showError(message) {
+    console.error('Error:', message);
+    alert('错误: ' + message);
+}
+
+// 导出操作记录
+async function exportOperations() {
+    try {
+        const response = await fetch('/api/operations/export');
+        const result = await response.json();
+        
+        if (!result.success) {
+            showError('导出失败: ' + result.error);
+            return;
+        }
+        
+        const exportData = result.data;
+        
+        if (exportData.length === 0) {
+            showError('没有可导出的操作记录');
+            return;
+        }
+        
+        // 为每个标靶创建一个JSON文件
+        exportData.forEach(data => {
+            const filename = `operations_${data.target_name}_${new Date().toISOString().split('T')[0]}.json`;
+            const jsonStr = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+        
+        showSuccess(`成功导出 ${exportData.length} 个标靶的操作记录`);
+    } catch (error) {
+        showError('导出失败: ' + error.message);
+    }
+}
+
+// 显示导入对话框
+function showImportDialog() {
+    document.getElementById('importFile').click();
+}
+
+// 处理导入文件
+async function handleImportFile(event) {
+    const files = event.target.files;
+    if (files.length === 0) return;
+    
+    const importData = [];
+    
+    try {
+        // 读取所有文件
+        for (let file of files) {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            
+            // 转换为导入格式
+            if (data.target_name && data.operations) {
+                importData.push({
+                    target_name: data.target_name,
+                    operations: data.operations.map(op => ({
+                        name: op.name,
+                        description: op.description,
+                        key_name: op.key_name,
+                        operation_type: op.operation_type,
+                        value: op.value,
+                        start_time: op.start_time,
+                        end_time: op.end_time,
+                        is_active: op.is_active !== undefined ? op.is_active : true
+                    }))
+                });
+            }
+        }
+        
+        if (importData.length === 0) {
+            showError('没有有效的导入数据');
+            return;
+        }
+        
+        // 发送导入请求
+        const response = await fetch('/api/operations/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(importData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess(`成功导入 ${result.data.length} 个操作记录`);
+            refreshOperationsList();
+        } else {
+            showError('导入失败: ' + result.error);
+        }
+    } catch (error) {
+        showError('导入失败: ' + error.message);
+    }
+    
+    // 清空文件选择
+    event.target.value = '';
+}

@@ -1,11 +1,35 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, FixedOffset};
 use duckdb::{Connection, Result as DuckResult};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::sync::{Arc, Mutex};
+
+// 自定义序列化函数，将UTC时间转换为上海时间
+fn serialize_shanghai_time<S>(datetime: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    // 上海时区 UTC+8
+    let shanghai_offset = FixedOffset::east_opt(8 * 3600).unwrap();
+    let shanghai_time = datetime.with_timezone(&shanghai_offset);
+    // 格式化为ISO8601格式，包含时区信息
+    serializer.serialize_str(&shanghai_time.to_rfc3339())
+}
+
+// 处理Option<DateTime<Utc>>的序列化
+fn serialize_optional_shanghai_time<S>(datetime: &Option<DateTime<Utc>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match datetime {
+        Some(dt) => serialize_shanghai_time(dt, serializer),
+        None => serializer.serialize_none(),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetryData {
+    #[serde(serialize_with = "serialize_shanghai_time")]
     pub timestamp: DateTime<Utc>,
     pub asset_name: String,
     pub device_name: String,
@@ -68,6 +92,55 @@ pub struct TimeRange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataOperation {
+    pub id: Option<i64>,
+    pub name: Option<String>,  // 改为可选，自动生成默认名称
+    pub description: Option<String>,
+    pub target_name: String,
+    pub key_name: String,
+    pub operation_type: OperationType,
+    pub value: f64,
+    #[serde(serialize_with = "serialize_optional_shanghai_time", skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<DateTime<Utc>>,
+    #[serde(serialize_with = "serialize_optional_shanghai_time", skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<DateTime<Utc>>,
+    pub is_active: bool,
+    #[serde(serialize_with = "serialize_shanghai_time")]
+    pub created_at: DateTime<Utc>,
+    #[serde(serialize_with = "serialize_shanghai_time")]
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OperationType {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
+impl OperationType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            OperationType::Add => "add",
+            OperationType::Subtract => "subtract",
+            OperationType::Multiply => "multiply",
+            OperationType::Divide => "divide",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "add" => Some(OperationType::Add),
+            "subtract" => Some(OperationType::Subtract),
+            "multiply" => Some(OperationType::Multiply),
+            "divide" => Some(OperationType::Divide),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReferenceValue {
     pub target_name: String,
     pub key_name: String,
@@ -98,18 +171,74 @@ pub struct CustomFilter {
 
 pub struct DatabaseManager {
     connection: Arc<Mutex<Connection>>,
+    db_path: String,
 }
 
 impl DatabaseManager {
     pub fn new(db_path: &str) -> Result<Self> {
         let conn = Connection::open(db_path)?;
-        Ok(DatabaseManager {
+        let manager = DatabaseManager {
             connection: Arc::new(Mutex::new(conn)),
-        })
+            db_path: db_path.to_string(),
+        };
+        manager.init_tables()?;
+        Ok(manager)
+    }
+    
+    // 创建新连接用于查询，避免锁竞争
+    fn get_read_connection(&self) -> Result<Connection> {
+        // DuckDB支持多个连接同时读取
+        Ok(Connection::open(&self.db_path)?)
+    }
+
+    fn init_tables(&self) -> Result<()> {
+        let conn = self.connection.lock().unwrap();
+        
+        // 创建序列
+        conn.execute(
+            "CREATE SEQUENCE IF NOT EXISTS seq_operations_id START 1",
+            [],
+        )?;
+        
+        // 创建数据操作记录表
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS data_operations (
+                id INTEGER PRIMARY KEY DEFAULT nextval('seq_operations_id'),
+                name VARCHAR,
+                description VARCHAR,
+                target_name VARCHAR NOT NULL,
+                key_name VARCHAR NOT NULL,
+                operation_type VARCHAR NOT NULL,
+                value DOUBLE NOT NULL,
+                start_time BIGINT,
+                end_time BIGINT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at BIGINT NOT NULL,
+                updated_at BIGINT NOT NULL
+            )",
+            [],
+        )?;
+        
+        // 暂时禁用索引创建，避免DuckDB断言错误
+        // 问题可能与在视图基础表上创建索引有关
+        println!("Skipping index creation to avoid DuckDB assertion error...");
+        
+        // 只创建数据操作表的索引（这个表是我们创建的，应该没问题）
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_operations_active 
+             ON data_operations(is_active)",
+            [],
+        ).ok();
+        
+        // 更新统计信息
+        conn.execute("ANALYZE data_operations", []).ok();
+        
+        Ok(())
     }
 
     pub fn get_filter_options(&self) -> Result<FilterOptions> {
-        let conn = self.connection.lock().unwrap();
+        // 使用独立连接避免死锁
+        let conn = self.get_read_connection()?;
 
         // 获取所有资产名称
         let mut stmt = conn.prepare("SELECT DISTINCT asset_name FROM a_d_t_telemetry ORDER BY asset_name")?;
@@ -144,7 +273,8 @@ impl DatabaseManager {
     }
 
     pub fn get_devices_by_asset(&self, asset_name: &str) -> Result<Vec<String>> {
-        let conn = self.connection.lock().unwrap();
+        // 使用独立连接避免死锁
+        let conn = self.get_read_connection()?;
         let mut stmt = conn.prepare(
             "SELECT DISTINCT d_name FROM a_d_t_telemetry WHERE asset_name = ? ORDER BY d_name"
         )?;
@@ -155,7 +285,8 @@ impl DatabaseManager {
     }
 
     pub fn get_targets_by_device(&self, asset_name: &str, device_name: &str) -> Result<Vec<String>> {
-        let conn = self.connection.lock().unwrap();
+        // 使用独立连接避免死锁
+        let conn = self.get_read_connection()?;
         let mut stmt = conn.prepare(
             "SELECT DISTINCT target_name FROM a_d_t_telemetry WHERE asset_name = ? AND d_name = ? ORDER BY target_name"
         )?;
@@ -165,8 +296,98 @@ impl DatabaseManager {
         Ok(targets)
     }
 
+    // 批量查询数据（用于流式传输）- 使用独立的只读连接避免死锁
+    pub fn query_telemetry_data_batch(&self, params: &QueryParams, offset: usize, limit: usize) -> Result<Vec<TelemetryData>> {
+        // 使用独立的只读连接，避免长时间持有主连接的锁
+        let conn = self.get_read_connection()?;
+        
+        // 构建基础查询
+        let mut query = format!(
+            "SELECT ts, asset_name, d_name as device_name, target_name, key_name, dbl_v 
+             FROM a_d_t_telemetry 
+             WHERE dbl_v IS NOT NULL"
+        );
+        
+        let mut conditions = Vec::new();
+        
+        if let Some(asset) = &params.asset_name {
+            conditions.push(format!("asset_name = '{}'", asset));
+        }
+        
+        if let Some(device) = &params.device_name {
+            conditions.push(format!("d_name = '{}'", device));
+        }
+        
+        if !params.target_names.is_empty() {
+            let targets = params.target_names.iter()
+                .map(|t| format!("'{}'", t))
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("target_name IN ({})", targets));
+        }
+        
+        if !params.key_names.is_empty() {
+            let keys = params.key_names.iter()
+                .map(|k| format!("'{}'", k))
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("key_name IN ({})", keys));
+        }
+        
+        if let Some(start) = params.start_time {
+            conditions.push(format!("ts >= {}", start.timestamp_millis()));
+        }
+        
+        if let Some(end) = params.end_time {
+            conditions.push(format!("ts <= {}", end.timestamp_millis()));
+        }
+        
+        if !conditions.is_empty() {
+            query.push_str(" AND ");
+            query.push_str(&conditions.join(" AND "));
+        }
+        
+        // 添加排序和分页
+        query.push_str(&format!(" ORDER BY ts DESC LIMIT {} OFFSET {}", limit, offset));
+        
+        // 执行查询
+        let mut stmt = conn.prepare(&query)?;
+        let mut rows = stmt.query([])?;
+        
+        let mut data = Vec::new();
+        while let Some(row) = rows.next()? {
+            let ts_millis: i64 = row.get(0)?;
+            let timestamp = DateTime::from_timestamp_millis(ts_millis)
+                .ok_or_else(|| anyhow::anyhow!("Invalid timestamp: {}", ts_millis))?;
+            
+            let value: Option<f64> = row.get(5)?;
+            if let Some(val) = value {
+                data.push(TelemetryData {
+                    timestamp,
+                    asset_name: row.get(1)?,
+                    device_name: row.get(2)?,
+                    target_name: row.get(3)?,
+                    key_name: row.get(4)?,
+                    value: val,
+                });
+            }
+        }
+        
+        // 应用数据操作（如果有）
+        let active_operations = self.get_operations(true)?;
+        if !active_operations.is_empty() {
+            self.apply_operations_to_data(&mut data, &active_operations);
+        }
+        
+        Ok(data)
+    }
+    
     pub fn query_telemetry_data(&self, params: &QueryParams) -> Result<TelemetryResponse> {
-        let conn = self.connection.lock().unwrap();
+        // 使用新的连接避免阻塞
+        let conn = self.get_read_connection()?;
+        
+        // 设置性能限制，避免查询过多数据  
+        let effective_limit = params.limit.unwrap_or(1000).min(50000);
 
         // 如果需要异常值统计，先获取原始数据量
         let original_count = if params.remove_outliers {
@@ -187,7 +408,10 @@ impl DatabaseManager {
             stmt.query(params_refs.as_slice())?
         };
 
-        let mut data = Vec::new();
+        let mut data = Vec::with_capacity(effective_limit.min(10000));
+        let mut row_count = 0;
+        
+        // 流式处理数据 - 避免一次性加载所有数据
         while let Some(row) = rows.next()? {
             let ts_millis: i64 = row.get(0)?;
             let timestamp = DateTime::from_timestamp_millis(ts_millis)
@@ -204,8 +428,31 @@ impl DatabaseManager {
                     key_name: row.get(4)?,
                     value: val,
                 });
+                
+                row_count += 1;
+                
+                // 达到限制时停止
+                if row_count >= effective_limit {
+                    break;
+                }
             }
-            // 如果value为NULL，跳过这条记录
+        }
+        
+        // 提前释放查询资源
+        drop(rows);
+        drop(stmt);
+
+        // 获取并应用激活的数据操作（优化：只获取相关的操作）
+        let active_operations = if !params.target_names.is_empty() || !params.key_names.is_empty() {
+            // 只获取与当前查询相关的操作
+            self.get_relevant_operations(&params.target_names, &params.key_names)?
+        } else {
+            self.get_operations(true)?
+        };
+        
+        // 只有存在激活操作时才应用
+        if !active_operations.is_empty() {
+            self.apply_operations_to_data(&mut data, &active_operations);
         }
 
         // 计算统计信息
@@ -378,8 +625,9 @@ impl DatabaseManager {
         })
     }
 
-    fn get_filtered_count(&self, params: &QueryParams, include_outlier_filter: bool) -> Result<usize> {
-        let conn = self.connection.lock().unwrap();
+    fn get_filtered_count(&self, params: &QueryParams, _include_outlier_filter: bool) -> Result<usize> {
+        // 使用独立连接避免死锁
+        let conn = self.get_read_connection()?;
 
         // 简化计数查询 - 直接计算基础筛选条件的数量，不进行复杂的异常值计算
         let base_query = "SELECT COUNT(*) FROM a_d_t_telemetry WHERE 1=1".to_string();
@@ -577,14 +825,14 @@ impl DatabaseManager {
             );
         }
 
-        // 如果设置了限制，添加LIMIT子句
-        if let Some(limit) = params.limit {
-            query = format!("SELECT * FROM ({}) limited LIMIT {}", query, limit);
-        }
-
         // 确保有ORDER BY子句
         if !query.to_lowercase().contains("order by") {
             query.push_str(" ORDER BY ts");
+        }
+        
+        // 如果设置了限制，添加LIMIT子句（必须在ORDER BY之后）
+        if let Some(limit) = params.limit {
+            query.push_str(&format!(" LIMIT {}", limit));
         }
 
         query
@@ -661,5 +909,275 @@ impl DatabaseManager {
             base_query,
             conditions.join(" OR ")
         )
+    }
+
+    pub fn create_operation(&self, operation: &DataOperation) -> Result<i64> {
+        // 使用新连接避免死锁
+        let conn = self.get_read_connection()?;
+        
+        let start_time_ms = operation.start_time.map(|t| t.timestamp_millis());
+        let end_time_ms = operation.end_time.map(|t| t.timestamp_millis());
+        let created_at_ms = operation.created_at.timestamp_millis();
+        let updated_at_ms = operation.updated_at.timestamp_millis();
+        
+        // 先获取下一个ID
+        let mut stmt = conn.prepare("SELECT nextval('seq_operations_id')")?;
+        let mut rows = stmt.query([])?;
+        let next_id: i64 = if let Some(row) = rows.next()? {
+            row.get(0)?
+        } else {
+            return Err(anyhow::anyhow!("Failed to get next ID"));
+        };
+        
+        conn.execute(
+            "INSERT INTO data_operations 
+            (id, name, description, target_name, key_name, operation_type, value, 
+             start_time, end_time, is_active, created_at, updated_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            duckdb::params![
+                &next_id,
+                &operation.name,
+                &operation.description,
+                &operation.target_name,
+                &operation.key_name,
+                operation.operation_type.as_str(),
+                &operation.value,
+                &start_time_ms,
+                &end_time_ms,
+                &operation.is_active,
+                &created_at_ms,
+                &updated_at_ms
+            ],
+        )?;
+        
+        Ok(next_id)
+    }
+
+    pub fn get_operations(&self, active_only: bool) -> Result<Vec<DataOperation>> {
+        // 使用独立连接避免死锁
+        let conn = self.get_read_connection()?;
+        
+        let query = if active_only {
+            "SELECT id, name, description, target_name, key_name, operation_type, 
+                    value, start_time, end_time, is_active, created_at, updated_at 
+             FROM data_operations WHERE is_active = true ORDER BY created_at DESC"
+        } else {
+            "SELECT id, name, description, target_name, key_name, operation_type, 
+                    value, start_time, end_time, is_active, created_at, updated_at 
+             FROM data_operations ORDER BY created_at DESC"
+        };
+        
+        let mut stmt = conn.prepare(query)?;
+        let mut rows = stmt.query([])?;
+        let mut operations = Vec::new();
+        
+        while let Some(row) = rows.next()? {
+            let operation_type_str: String = row.get(5)?;
+            let operation_type = OperationType::from_str(&operation_type_str)
+                .ok_or_else(|| anyhow::anyhow!("Invalid operation type: {}", operation_type_str))?;
+            
+            let start_time_ms: Option<i64> = row.get(7)?;
+            let end_time_ms: Option<i64> = row.get(8)?;
+            let created_at_ms: i64 = row.get(10)?;
+            let updated_at_ms: i64 = row.get(11)?;
+            
+            operations.push(DataOperation {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                description: row.get(2)?,
+                target_name: row.get(3)?,
+                key_name: row.get(4)?,
+                operation_type,
+                value: row.get(6)?,
+                start_time: start_time_ms.and_then(|ms| DateTime::from_timestamp_millis(ms)),
+                end_time: end_time_ms.and_then(|ms| DateTime::from_timestamp_millis(ms)),
+                is_active: row.get(9)?,
+                created_at: DateTime::from_timestamp_millis(created_at_ms)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid created_at timestamp"))?,
+                updated_at: DateTime::from_timestamp_millis(updated_at_ms)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid updated_at timestamp"))?,
+            });
+        }
+        
+        Ok(operations)
+    }
+
+    pub fn update_operation(&self, operation: &DataOperation) -> Result<()> {
+        // 使用新连接避免死锁
+        let conn = self.get_read_connection()?;
+        
+        let id = operation.id.ok_or_else(|| anyhow::anyhow!("Operation ID is required for update"))?;
+        let start_time_ms = operation.start_time.map(|t| t.timestamp_millis());
+        let end_time_ms = operation.end_time.map(|t| t.timestamp_millis());
+        let updated_at_ms = Utc::now().timestamp_millis();
+        
+        conn.execute(
+            "UPDATE data_operations SET 
+             name = ?, description = ?, target_name = ?, key_name = ?, 
+             operation_type = ?, value = ?, start_time = ?, end_time = ?, 
+             is_active = ?, updated_at = ? 
+             WHERE id = ?",
+            duckdb::params![
+                &operation.name,
+                &operation.description,
+                &operation.target_name,
+                &operation.key_name,
+                operation.operation_type.as_str(),
+                &operation.value,
+                &start_time_ms,
+                &end_time_ms,
+                &operation.is_active,
+                &updated_at_ms,
+                &id
+            ],
+        )?;
+        
+        Ok(())
+    }
+
+    pub fn delete_operation(&self, id: i64) -> Result<()> {
+        // 使用新连接避免死锁
+        let conn = self.get_read_connection()?;
+        conn.execute("DELETE FROM data_operations WHERE id = ?", [id])?;
+        Ok(())
+    }
+
+    pub fn toggle_operation(&self, id: i64) -> Result<()> {
+        // 使用新连接避免死锁
+        let conn = self.get_read_connection()?;
+        let updated_at_ms = Utc::now().timestamp_millis();
+        
+        conn.execute(
+            "UPDATE data_operations SET 
+             is_active = NOT is_active, updated_at = ? 
+             WHERE id = ?",
+            duckdb::params![&updated_at_ms, &id],
+        )?;
+        
+        Ok(())
+    }
+    
+    // 优化：只获取与查询相关的操作
+    pub fn get_relevant_operations(&self, target_names: &[String], key_names: &[String]) -> Result<Vec<DataOperation>> {
+        // 使用独立连接避免死锁
+        let conn = self.get_read_connection()?;
+        
+        let mut query = String::from(
+            "SELECT id, name, description, target_name, key_name, operation_type, 
+                    value, start_time, end_time, is_active, created_at, updated_at 
+             FROM data_operations 
+             WHERE is_active = true"
+        );
+        
+        let mut conditions = Vec::new();
+        
+        if !target_names.is_empty() {
+            let placeholders = target_names.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            conditions.push(format!("target_name IN ({})", placeholders));
+        }
+        
+        if !key_names.is_empty() {
+            let placeholders = key_names.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            conditions.push(format!("key_name IN ({})", placeholders));
+        }
+        
+        if !conditions.is_empty() {
+            query.push_str(" AND (");
+            query.push_str(&conditions.join(" OR "));
+            query.push_str(")");
+        }
+        
+        query.push_str(" ORDER BY created_at DESC");
+        
+        let mut stmt = conn.prepare(&query)?;
+        
+        // 构建参数列表
+        let mut params: Vec<Box<dyn duckdb::ToSql>> = Vec::new();
+        for target in target_names {
+            params.push(Box::new(target.clone()));
+        }
+        for key in key_names {
+            params.push(Box::new(key.clone()));
+        }
+        
+        let mut rows = if params.is_empty() {
+            stmt.query([])?
+        } else {
+            let params_refs: Vec<&dyn duckdb::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+            stmt.query(params_refs.as_slice())?
+        };
+        
+        let mut operations = Vec::new();
+        
+        while let Some(row) = rows.next()? {
+            let operation_type_str: String = row.get(5)?;
+            let operation_type = OperationType::from_str(&operation_type_str)
+                .ok_or_else(|| anyhow::anyhow!("Invalid operation type: {}", operation_type_str))?;
+            
+            let start_time_ms: Option<i64> = row.get(7)?;
+            let end_time_ms: Option<i64> = row.get(8)?;
+            let created_at_ms: i64 = row.get(10)?;
+            let updated_at_ms: i64 = row.get(11)?;
+            
+            operations.push(DataOperation {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                description: row.get(2)?,
+                target_name: row.get(3)?,
+                key_name: row.get(4)?,
+                operation_type,
+                value: row.get(6)?,
+                start_time: start_time_ms.and_then(|ms| DateTime::from_timestamp_millis(ms)),
+                end_time: end_time_ms.and_then(|ms| DateTime::from_timestamp_millis(ms)),
+                is_active: row.get(9)?,
+                created_at: DateTime::from_timestamp_millis(created_at_ms)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid created_at timestamp"))?,
+                updated_at: DateTime::from_timestamp_millis(updated_at_ms)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid updated_at timestamp"))?,
+            });
+        }
+        
+        Ok(operations)
+    }
+
+    pub fn apply_operations_to_data(&self, data: &mut Vec<TelemetryData>, operations: &[DataOperation]) {
+        for operation in operations {
+            if !operation.is_active {
+                continue;
+            }
+            
+            for item in data.iter_mut() {
+                // 检查是否匹配标靶和指标
+                if item.target_name != operation.target_name || item.key_name != operation.key_name {
+                    continue;
+                }
+                
+                // 检查时间范围
+                let in_time_range = match (operation.start_time, operation.end_time) {
+                    (Some(start), Some(end)) => item.timestamp >= start && item.timestamp <= end,
+                    (Some(start), None) => item.timestamp >= start,
+                    (None, Some(end)) => item.timestamp <= end,
+                    (None, None) => true,
+                };
+                
+                if !in_time_range {
+                    continue;
+                }
+                
+                // 应用操作
+                item.value = match operation.operation_type {
+                    OperationType::Add => item.value + operation.value,
+                    OperationType::Subtract => item.value - operation.value,
+                    OperationType::Multiply => item.value * operation.value,
+                    OperationType::Divide => {
+                        if operation.value != 0.0 {
+                            item.value / operation.value
+                        } else {
+                            item.value
+                        }
+                    }
+                };
+            }
+        }
     }
 }

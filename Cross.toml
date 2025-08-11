@@ -1,0 +1,79 @@
+[build]
+# 使用最新的构建配置
+default-target = "x86_64-pc-windows-gnu"
+
+[target.x86_64-pc-windows-gnu]
+# 使用最新的官方镜像
+image = "ghcr.io/cross-rs/x86_64-pc-windows-gnu:main"
+# 预构建钩子：设置代理、升级工具链并强制C++17
+pre-build = [
+    "export http_proxy=http://192.168.1.150:7890",
+    "export https_proxy=http://192.168.1.150:7890",
+    "export HTTP_PROXY=http://192.168.1.150:7890",
+    "export HTTPS_PROXY=http://192.168.1.150:7890",
+    "dpkg --add-architecture i386",
+    "apt-get update",
+    "apt-get install --assume-yes libc6-dev libc6-dev:i386",
+    "apt-get install --assume-yes build-essential",
+    "apt-get install --assume-yes gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64",
+    "update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix || true",
+    "update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix || true",
+    "echo 'Forcing C++17 standard for DuckDB compilation'",
+]
+
+[target.x86_64-pc-windows-gnu.env]
+# 设置代理环境变量
+http_proxy = "http://192.168.1.150:7890"
+https_proxy = "http://192.168.1.150:7890"
+HTTP_PROXY = "http://192.168.1.150:7890"
+HTTPS_PROXY = "http://192.168.1.150:7890"
+# 强制C++17标准 - 覆盖DuckDB的C++11设置，完全静态链接
+CXXFLAGS = "-std=c++17 -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -pthread -static-libgcc -static-libstdc++ -static"
+CFLAGS = "-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -static-libgcc -static"
+LDFLAGS = "-static-libgcc -static-libstdc++ -static"
+# 强制cc-rs使用C++17
+CXX_FLAGS = "-std=c++17"
+CC_FLAGS = "-std=c17"
+# DuckDB特定的构建标志覆盖
+DUCKDB_BUILD_FLAGS = "-std=c++17"
+# 编译器设置
+CC_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-gcc-posix"
+CXX_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-g++-posix"
+AR_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-ar"
+# Windows系统库
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "x86_64-w64-mingw32-gcc-posix"
+RUSTFLAGS = "-C target-feature=+crt-static -C link-args=-static -C link-args=-static-libgcc -C link-args=-static-libstdc++ -C link-args=-lws2_32 -C link-args=-ladvapi32 -C link-args=-luserenv -C link-args=-lpthread"
+
+[target.i686-pc-windows-gnu]
+# 32位Windows支持
+image = "ghcr.io/cross-rs/i686-pc-windows-gnu:main"
+
+[target.x86_64-apple-darwin]
+# Intel Mac支持
+image = "ghcr.io/cross-rs/x86_64-apple-darwin:edge"
+
+[target.aarch64-apple-darwin]
+# Apple Silicon Mac支持
+image = "ghcr.io/cross-rs/aarch64-apple-darwin:edge"
+
+[build.env]
+# 环境变量传递
+passthrough = [
+    "RUST_LOG",
+    "RUST_BACKTRACE",
+    "http_proxy",
+    "https_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "CXXFLAGS",
+    "CFLAGS",
+    "LDFLAGS",
+    "CXX_FLAGS",
+    "CC_FLAGS",
+    "DUCKDB_BUILD_FLAGS",
+    "CC_x86_64_pc_windows_gnu",
+    "CXX_x86_64_pc_windows_gnu",
+    "AR_x86_64_pc_windows_gnu",
+    "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER",
+    "RUSTFLAGS",
+]

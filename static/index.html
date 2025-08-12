@@ -14,6 +14,95 @@
             background-color: #f5f5f5;
         }
         
+        /* 可搜索下拉框样式 */
+        .searchable-select {
+            position: relative;
+            width: 100%;
+        }
+        
+        .searchable-select-input {
+            width: 100%;
+            padding: 8px 30px 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .searchable-select-input::after {
+            content: '▼';
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .searchable-select-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .searchable-select-dropdown.show {
+            display: block;
+        }
+        
+        .searchable-select-search {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 1;
+        }
+        
+        .searchable-select-search input {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        
+        .searchable-select-options {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        
+        .searchable-select-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .searchable-select-option:hover {
+            background: #f0f0f0;
+        }
+        
+        .searchable-select-option.selected {
+            background: #e8f4fd;
+            font-weight: 500;
+        }
+        
+        .searchable-select-no-results {
+            padding: 12px;
+            text-align: center;
+            color: #999;
+        }
+        
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -337,17 +426,13 @@
         <div class="controls">
             <div class="filter-row">
                 <div class="filter-group">
-                    <label for="assetSelect">资产名称:</label>
-                    <select id="assetSelect">
-                        <option value="">请选择资产...</option>
-                    </select>
+                    <label>资产名称:</label>
+                    <div id="mainAssetContainer"></div>
                 </div>
                 
                 <div class="filter-group">
-                    <label for="deviceSelect">设备名称:</label>
-                    <select id="deviceSelect" disabled>
-                        <option value="">请先选择资产...</option>
-                    </select>
+                    <label>设备名称:</label>
+                    <div id="mainDeviceContainer"></div>
                 </div>
                 
                 <div class="filter-group">
@@ -578,29 +663,53 @@
             </div>
             <div class="modal-body">
                 <div style="margin-bottom: 20px;">
-                    <button class="btn btn-primary" onclick="showAddOperationForm()">新增操作</button>
-                    <button class="btn" onclick="refreshOperationsList()">刷新列表</button>
-                    <button class="btn" onclick="exportOperations()">导出操作</button>
-                    <button class="btn" onclick="showImportDialog()">导入操作</button>
-                    <input type="file" id="importFile" style="display: none;" accept=".json" onchange="handleImportFile(event)" multiple>
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <button class="btn btn-primary" onclick="showAddOperationForm()">新增操作</button>
+                            <button class="btn" onclick="refreshOperationsList()">刷新列表</button>
+                            <button class="btn" onclick="exportOperations()">导出操作</button>
+                            <button class="btn" onclick="showImportDialog()">导入操作</button>
+                            <input type="file" id="importFile" style="display: none;" accept=".json" onchange="handleImportFile(event)" multiple>
+                        </div>
+                        
+                        <!-- 搜索筛选区域 -->
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="text" id="operationsSearchInput" placeholder="搜索标靶、指标或操作名称..." 
+                                   style="width: 250px; padding: 6px;" onkeyup="filterOperations()">
+                            <select id="operationsFilterType" onchange="filterOperations()" style="padding: 6px;">
+                                <option value="">所有操作类型</option>
+                                <option value="Add">加法 (+)</option>
+                                <option value="Subtract">减法 (-)</option>
+                                <option value="Multiply">乘法 (×)</option>
+                                <option value="Divide">除法 (÷)</option>
+                            </select>
+                            <select id="operationsFilterStatus" onchange="filterOperations()" style="padding: 6px;">
+                                <option value="">所有状态</option>
+                                <option value="active">启用</option>
+                                <option value="inactive">停用</option>
+                            </select>
+                            <button class="btn" onclick="clearOperationsFilter()" style="padding: 6px 12px; background: #dc3545;">清除筛选</button>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- 快速添加操作表单 -->
-                <div id="quickAddForm" style="background: #f0f8ff; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
-                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                        <select id="quickTarget" style="width: 150px;">
-                            <option value="">标靶</option>
-                        </select>
-                        <select id="quickKey" style="width: 120px;">
-                            <option value="">指标</option>
-                        </select>
+                <div id="quickAddForm" style="background: #f0f8ff; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                    <h4 style="margin-top: 0; margin-bottom: 10px; font-size: 14px;">快速添加操作</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                        <div id="quickAssetContainer"></div>
+                        <div id="quickDeviceContainer"></div>
+                        <div id="quickTargetContainer"></div>
+                        <div id="quickKeyContainer"></div>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
                         <select id="quickOperation" style="width: 60px;">
                             <option value="add">+</option>
                             <option value="subtract">-</option>
                             <option value="multiply">×</option>
                             <option value="divide">÷</option>
                         </select>
-                        <input type="number" id="quickValue" step="any" placeholder="数值" style="width: 80px;">
+                        <input type="number" id="quickValue" step="any" placeholder="数值" style="width: 100px;">
                         <button class="btn btn-primary" onclick="quickAddOperation()" style="padding: 5px 15px;">快速添加</button>
                         <button class="btn" onclick="toggleAdvancedForm()" style="padding: 5px 10px;">高级选项</button>
                     </div>
@@ -636,22 +745,45 @@
                 
                 <!-- 操作列表 -->
                 <div id="operationsList">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-                        <thead>
-                            <tr style="background: #f5f5f5;">
-                                <th style="padding: 8px 5px; text-align: center; border-bottom: 2px solid #ddd; width: 40px;">启用</th>
-                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">操作</th>
-                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">标靶</th>
-                                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">指标</th>
-                                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #ddd; width: 120px;">快捷操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="operationsTableBody">
-                            <tr>
-                                <td colspan="5" style="padding: 20px; text-align: center; color: #999;">正在加载...</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                            <thead>
+                                <tr style="background: #f5f5f5; position: sticky; top: 0; z-index: 10;">
+                                    <th style="padding: 8px 5px; text-align: center; border-bottom: 2px solid #ddd; width: 40px;">启用</th>
+                                    <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">操作</th>
+                                    <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">标靶</th>
+                                    <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ddd;">指标</th>
+                                    <th style="padding: 8px; text-align: center; border-bottom: 2px solid #ddd; width: 120px;">快捷操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="operationsTableBody">
+                                <tr>
+                                    <td colspan="5" style="padding: 20px; text-align: center; color: #999;">正在加载...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- 分页控件 -->
+                    <div id="operationsPagination" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-top: 1px solid #ddd; background: #f9f9f9;">
+                        <div>
+                            <span>每页显示: </span>
+                            <select id="operationsPageSize" onchange="changeOperationsPageSize()" style="padding: 4px;">
+                                <option value="10">10条</option>
+                                <option value="20" selected>20条</option>
+                                <option value="50">50条</option>
+                                <option value="100">100条</option>
+                            </select>
+                            <span style="margin-left: 10px;">共 <span id="operationsTotalCount">0</span> 条记录</span>
+                        </div>
+                        <div style="display: flex; gap: 5px; align-items: center;">
+                            <button class="btn" onclick="firstPageOperations()" style="padding: 4px 8px; font-size: 12px; background: #6c757d;">首页</button>
+                            <button class="btn" onclick="prevPageOperations()" style="padding: 4px 8px; font-size: 12px; background: #6c757d;">上一页</button>
+                            <span>第 <input type="number" id="operationsCurrentPage" value="1" min="1" style="width: 50px; padding: 2px; text-align: center;" onchange="goToPageOperations()"> / <span id="operationsTotalPages">1</span> 页</span>
+                            <button class="btn" onclick="nextPageOperations()" style="padding: 4px 8px; font-size: 12px; background: #6c757d;">下一页</button>
+                            <button class="btn" onclick="lastPageOperations()" style="padding: 4px 8px; font-size: 12px; background: #6c757d;">末页</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -4,6 +4,150 @@ let currentData = [];
 let referenceValues = []; // 存储参考值配置
 let timeRanges = []; // 存储时间段配置
 
+// 创建可搜索的下拉选择框
+function createSearchableSelect(containerId, options, value, placeholder, onChangeCallback) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    // 清空容器
+    container.innerHTML = '';
+    container.className = 'searchable-select';
+    
+    // 创建显示输入框
+    const displayInput = document.createElement('div');
+    displayInput.className = 'searchable-select-input';
+    displayInput.textContent = value || placeholder || '请选择...';
+    if (!value) {
+        displayInput.style.color = '#999';
+    }
+    
+    // 创建下拉箭头
+    const arrow = document.createElement('span');
+    arrow.style.cssText = 'position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none;';
+    arrow.textContent = '▼';
+    displayInput.appendChild(arrow);
+    
+    // 创建下拉面板
+    const dropdown = document.createElement('div');
+    dropdown.className = 'searchable-select-dropdown';
+    
+    // 创建搜索框
+    const searchDiv = document.createElement('div');
+    searchDiv.className = 'searchable-select-search';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = '搜索...';
+    searchDiv.appendChild(searchInput);
+    
+    // 创建选项容器
+    const optionsDiv = document.createElement('div');
+    optionsDiv.className = 'searchable-select-options';
+    
+    // 渲染选项
+    function renderOptions(searchTerm = '') {
+        optionsDiv.innerHTML = '';
+        
+        const filteredOptions = options.filter(opt => 
+            opt.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        
+        if (filteredOptions.length === 0) {
+            const noResults = document.createElement('div');
+            noResults.className = 'searchable-select-no-results';
+            noResults.textContent = '没有匹配的选项';
+            optionsDiv.appendChild(noResults);
+            return;
+        }
+        
+        // 添加空选项
+        const emptyOption = document.createElement('div');
+        emptyOption.className = 'searchable-select-option';
+        emptyOption.textContent = placeholder || '请选择...';
+        emptyOption.style.color = '#999';
+        emptyOption.onclick = function() {
+            displayInput.textContent = placeholder || '请选择...';
+            displayInput.style.color = '#999';
+            dropdown.classList.remove('show');
+            if (onChangeCallback) {
+                onChangeCallback('');
+            }
+        };
+        optionsDiv.appendChild(emptyOption);
+        
+        filteredOptions.forEach(opt => {
+            const optionDiv = document.createElement('div');
+            optionDiv.className = 'searchable-select-option';
+            if (opt === value) {
+                optionDiv.classList.add('selected');
+            }
+            optionDiv.textContent = opt;
+            optionDiv.onclick = function() {
+                displayInput.textContent = opt;
+                displayInput.style.color = '';
+                dropdown.classList.remove('show');
+                if (onChangeCallback) {
+                    onChangeCallback(opt);
+                }
+            };
+            optionsDiv.appendChild(optionDiv);
+        });
+    }
+    
+    // 搜索事件
+    searchInput.oninput = function() {
+        renderOptions(this.value);
+    };
+    
+    // 点击显示/隐藏下拉框
+    displayInput.onclick = function(e) {
+        e.stopPropagation();
+        const isShowing = dropdown.classList.contains('show');
+        
+        // 关闭所有其他下拉框
+        document.querySelectorAll('.searchable-select-dropdown').forEach(d => {
+            d.classList.remove('show');
+        });
+        
+        if (!isShowing) {
+            dropdown.classList.add('show');
+            searchInput.value = '';
+            renderOptions();
+            searchInput.focus();
+        }
+    };
+    
+    // 点击外部关闭下拉框
+    document.addEventListener('click', function(e) {
+        if (!container.contains(e.target)) {
+            dropdown.classList.remove('show');
+        }
+    });
+    
+    dropdown.appendChild(searchDiv);
+    dropdown.appendChild(optionsDiv);
+    container.appendChild(displayInput);
+    container.appendChild(dropdown);
+    
+    // 初始渲染
+    renderOptions();
+    
+    return {
+        setValue: function(val) {
+            displayInput.textContent = val || placeholder || '请选择...';
+            displayInput.style.color = val ? '' : '#999';
+        },
+        getValue: function() {
+            return displayInput.textContent === placeholder ? '' : displayInput.textContent;
+        }
+    };
+}
+
+// 存储主界面的可搜索下拉框实例
+let mainSelects = {
+    asset: null,
+    device: null
+};
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
@@ -41,15 +185,120 @@ async function loadFilterOptions() {
 
 // 填充资产选择器
 function populateAssetSelect() {
-    const assetSelect = document.getElementById('assetSelect');
-    assetSelect.innerHTML = '<option value="">请选择资产...</option>';
+    if (filterOptions.assets) {
+        mainSelects.asset = createSearchableSelect(
+            'mainAssetContainer',
+            filterOptions.assets || [],
+            '',
+            '请选择资产...',
+            async function(value) {
+                // 重置设备和标靶
+                if (mainSelects.device) mainSelects.device.setValue('');
+                const targetCheckboxes = document.getElementById('targetCheckboxes');
+                if (targetCheckboxes) {
+                    targetCheckboxes.innerHTML = '<div class="info">请先选择设备以加载标靶列表</div>';
+                }
+                
+                // 加载设备列表
+                if (value) {
+                    await loadMainDevices(value);
+                } else {
+                    // 清空设备列表
+                    mainSelects.device = createSearchableSelect(
+                        'mainDeviceContainer',
+                        [],
+                        '',
+                        '请先选择资产...',
+                        null
+                    );
+                }
+            }
+        );
+    }
     
-    filterOptions.assets.forEach(asset => {
-        const option = document.createElement('option');
-        option.value = asset;
-        option.textContent = asset;
-        assetSelect.appendChild(option);
-    });
+    // 创建空的设备选择器
+    mainSelects.device = createSearchableSelect(
+        'mainDeviceContainer',
+        [],
+        '',
+        '请先选择资产...',
+        null
+    );
+}
+
+// 加载主界面设备列表
+async function loadMainDevices(assetName) {
+    try {
+        const response = await fetch(`/api/devices?asset_name=${encodeURIComponent(assetName)}`);
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            mainSelects.device = createSearchableSelect(
+                'mainDeviceContainer',
+                result.data,
+                '',
+                '请选择设备...',
+                async function(value) {
+                    // 加载标靶列表
+                    if (value) {
+                        await loadMainTargets(assetName, value);
+                    } else {
+                        const targetCheckboxes = document.getElementById('targetCheckboxes');
+                        if (targetCheckboxes) {
+                            targetCheckboxes.innerHTML = '<div class="info">请先选择设备以加载标靶列表</div>';
+                        }
+                    }
+                }
+            );
+        }
+    } catch (error) {
+        showError('加载设备列表失败: ' + error.message);
+    }
+}
+
+// 加载主界面标靶列表
+async function loadMainTargets(assetName, deviceName) {
+    const targetCheckboxes = document.getElementById('targetCheckboxes');
+    if (!targetCheckboxes) return;
+    
+    targetCheckboxes.innerHTML = '<div class="info">正在加载标靶列表...</div>';
+    
+    try {
+        const response = await fetch(`/api/targets?asset_name=${encodeURIComponent(assetName)}&device_name=${encodeURIComponent(deviceName)}`);
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || '获取标靶列表失败');
+        }
+        
+        targetCheckboxes.innerHTML = '';
+        
+        if (result.data.length === 0) {
+            targetCheckboxes.innerHTML = '<div class="info">该设备下没有标靶数据</div>';
+            return;
+        }
+        
+        result.data.forEach(target => {
+            const checkboxItem = document.createElement('div');
+            checkboxItem.className = 'checkbox-item';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `target_${target}`;
+            checkbox.value = target;
+            
+            const label = document.createElement('label');
+            label.htmlFor = `target_${target}`;
+            label.textContent = target;
+            
+            checkboxItem.appendChild(checkbox);
+            checkboxItem.appendChild(label);
+            targetCheckboxes.appendChild(checkboxItem);
+        });
+    } catch (error) {
+        showError('加载标靶列表失败: ' + error.message);
+        targetCheckboxes.innerHTML = '<div class="error">加载标靶列表失败</div>';
+    }
 }
 
 // 填充数据类型复选框
@@ -83,8 +332,6 @@ function populateKeyNameSelect() {
 
 // 设置事件监听器
 function setupEventListeners() {
-    document.getElementById('assetSelect').addEventListener('change', onAssetChange);
-    document.getElementById('deviceSelect').addEventListener('change', onDeviceChange);
     document.getElementById('removeOutliers').addEventListener('change', onOutlierToggle);
     document.getElementById('enableCustomFilter').addEventListener('change', onCustomFilterToggle);
     document.getElementById('enableTimeFilter').addEventListener('change', onTimeFilterToggle);
@@ -156,92 +403,6 @@ function onPerformanceModeToggle() {
     }
 }
 
-// 资产选择变化处理
-async function onAssetChange() {
-    const assetSelect = document.getElementById('assetSelect');
-    const deviceSelect = document.getElementById('deviceSelect');
-    const targetCheckboxes = document.getElementById('targetCheckboxes');
-    
-    // 重置设备和标靶选择
-    deviceSelect.innerHTML = '<option value="">请选择设备...</option>';
-    deviceSelect.disabled = true;
-    targetCheckboxes.innerHTML = '<div class="info">请先选择设备以加载标靶列表</div>';
-    
-    if (!assetSelect.value) {
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/devices?asset_name=${encodeURIComponent(assetSelect.value)}`);
-        const result = await response.json();
-        
-        if (!result.success) {
-            throw new Error(result.error || '获取设备列表失败');
-        }
-        
-        result.data.forEach(device => {
-            const option = document.createElement('option');
-            option.value = device;
-            option.textContent = device;
-            deviceSelect.appendChild(option);
-        });
-        
-        deviceSelect.disabled = false;
-    } catch (error) {
-        showError('加载设备列表失败: ' + error.message);
-    }
-}
-
-// 设备选择变化处理
-async function onDeviceChange() {
-    const assetSelect = document.getElementById('assetSelect');
-    const deviceSelect = document.getElementById('deviceSelect');
-    const targetCheckboxes = document.getElementById('targetCheckboxes');
-    
-    targetCheckboxes.innerHTML = '<div class="info">正在加载标靶列表...</div>';
-    
-    if (!deviceSelect.value) {
-        targetCheckboxes.innerHTML = '<div class="info">请先选择设备以加载标靶列表</div>';
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/targets?asset_name=${encodeURIComponent(assetSelect.value)}&device_name=${encodeURIComponent(deviceSelect.value)}`);
-        const result = await response.json();
-        
-        if (!result.success) {
-            throw new Error(result.error || '获取标靶列表失败');
-        }
-        
-        targetCheckboxes.innerHTML = '';
-        
-        if (result.data.length === 0) {
-            targetCheckboxes.innerHTML = '<div class="info">该设备下没有标靶数据</div>';
-            return;
-        }
-        
-        result.data.forEach(target => {
-            const checkboxItem = document.createElement('div');
-            checkboxItem.className = 'checkbox-item';
-            
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.id = `target_${target}`;
-            checkbox.value = target;
-            
-            const label = document.createElement('label');
-            label.htmlFor = `target_${target}`;
-            label.textContent = target;
-            
-            checkboxItem.appendChild(checkbox);
-            checkboxItem.appendChild(label);
-            targetCheckboxes.appendChild(checkboxItem);
-        });
-    } catch (error) {
-        showError('加载标靶列表失败: ' + error.message);
-        targetCheckboxes.innerHTML = '<div class="error">加载标靶列表失败</div>';
-    }
-}
 
 // 设置默认时间范围（最近24小时）
 function setDefaultTimeRange() {
@@ -306,8 +467,8 @@ function initializeChart() {
 
 // 加载数据
 async function loadData() {
-    const assetName = document.getElementById('assetSelect').value;
-    const deviceName = document.getElementById('deviceSelect').value;
+    const assetName = mainSelects.asset ? mainSelects.asset.getValue() : '';
+    const deviceName = mainSelects.device ? mainSelects.device.getValue() : '';
     const startTime = document.getElementById('startTime').value;
     const endTime = document.getElementById('endTime').value;
     const removeOutliers = document.getElementById('removeOutliers').checked;
@@ -409,8 +570,8 @@ async function loadData() {
 
 // 流式加载数据（用于大数据量）
 async function loadDataStream() {
-    const assetName = document.getElementById('assetSelect').value;
-    const deviceName = document.getElementById('deviceSelect').value;
+    const assetName = mainSelects.asset ? mainSelects.asset.getValue() : '';
+    const deviceName = mainSelects.device ? mainSelects.device.getValue() : '';
     const startTime = document.getElementById('startTime').value;
     const endTime = document.getElementById('endTime').value;
     const removeOutliers = document.getElementById('removeOutliers').checked;
@@ -1520,6 +1681,8 @@ function hideReferenceValueModal() {
 
 function addReferenceValue() {
     referenceValues.push({
+        asset_name: '',
+        device_name: '',
         target_name: '',
         key_name: '',
         reference_value: 0
@@ -1532,7 +1695,7 @@ function removeReferenceValue(index) {
     renderReferenceValueList();
 }
 
-function renderReferenceValueList() {
+async function renderReferenceValueList() {
     const container = document.getElementById('referenceValueList');
     container.innerHTML = '';
 
@@ -1541,30 +1704,156 @@ function renderReferenceValueList() {
         return;
     }
 
-    referenceValues.forEach((refVal, index) => {
+    for (let index = 0; index < referenceValues.length; index++) {
+        const refVal = referenceValues[index];
         const item = document.createElement('div');
         item.className = 'reference-value-item';
+        item.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 100px 60px; gap: 10px; margin-bottom: 10px; align-items: center;';
 
-        item.innerHTML = `
-            <select onchange="updateReferenceValue(${index}, 'target_name', this.value)">
-                <option value="">选择标靶...</option>
-                ${filterOptions.targets ? filterOptions.targets.map(target =>
-                    `<option value="${target}" ${refVal.target_name === target ? 'selected' : ''}>${target}</option>`
-                ).join('') : ''}
-            </select>
-            <select onchange="updateReferenceValue(${index}, 'key_name', this.value)">
-                <option value="">选择指标...</option>
-                ${filterOptions.key_names ? filterOptions.key_names.map(keyName =>
-                    `<option value="${keyName}" ${refVal.key_name === keyName ? 'selected' : ''}>${keyName}</option>`
-                ).join('') : ''}
-            </select>
-            <input type="number" step="any" placeholder="参考值" value="${refVal.reference_value}"
-                   onchange="updateReferenceValue(${index}, 'reference_value', parseFloat(this.value) || 0)">
-            <button class="remove-btn" onclick="removeReferenceValue(${index})">删除</button>
-        `;
+        // 资产选择
+        const assetSelect = document.createElement('select');
+        assetSelect.id = `refAsset_${index}`;
+        assetSelect.innerHTML = '<option value="">选择资产...</option>';
+        if (filterOptions.assets) {
+            filterOptions.assets.forEach(asset => {
+                const option = document.createElement('option');
+                option.value = asset;
+                option.textContent = asset;
+                option.selected = refVal.asset_name === asset;
+                assetSelect.appendChild(option);
+            });
+        }
+        assetSelect.onchange = async function() {
+            updateReferenceValue(index, 'asset_name', this.value);
+            updateReferenceValue(index, 'device_name', '');
+            updateReferenceValue(index, 'target_name', '');
+            await updateReferenceDeviceOptions(index);
+        };
 
+        // 设备选择
+        const deviceSelect = document.createElement('select');
+        deviceSelect.id = `refDevice_${index}`;
+        deviceSelect.innerHTML = '<option value="">选择设备...</option>';
+        deviceSelect.onchange = async function() {
+            updateReferenceValue(index, 'device_name', this.value);
+            updateReferenceValue(index, 'target_name', '');
+            await updateReferenceTargetOptions(index);
+        };
+
+        // 标靶选择
+        const targetSelect = document.createElement('select');
+        targetSelect.id = `refTarget_${index}`;
+        targetSelect.innerHTML = '<option value="">选择标靶...</option>';
+        targetSelect.onchange = function() {
+            updateReferenceValue(index, 'target_name', this.value);
+        };
+
+        // 指标选择
+        const keySelect = document.createElement('select');
+        keySelect.innerHTML = '<option value="">选择指标...</option>';
+        if (filterOptions.key_names) {
+            filterOptions.key_names.forEach(keyName => {
+                const option = document.createElement('option');
+                option.value = keyName;
+                option.textContent = keyName;
+                option.selected = refVal.key_name === keyName;
+                keySelect.appendChild(option);
+            });
+        }
+        keySelect.onchange = function() {
+            updateReferenceValue(index, 'key_name', this.value);
+        };
+
+        // 参考值输入
+        const valueInput = document.createElement('input');
+        valueInput.type = 'number';
+        valueInput.step = 'any';
+        valueInput.placeholder = '参考值';
+        valueInput.value = refVal.reference_value;
+        valueInput.style.width = '100%';
+        valueInput.onchange = function() {
+            updateReferenceValue(index, 'reference_value', parseFloat(this.value) || 0);
+        };
+
+        // 删除按钮
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'remove-btn';
+        removeBtn.textContent = '删除';
+        removeBtn.onclick = function() {
+            removeReferenceValue(index);
+        };
+
+        item.appendChild(assetSelect);
+        item.appendChild(deviceSelect);
+        item.appendChild(targetSelect);
+        item.appendChild(keySelect);
+        item.appendChild(valueInput);
+        item.appendChild(removeBtn);
         container.appendChild(item);
-    });
+
+        // 如果已有资产选择，加载设备
+        if (refVal.asset_name) {
+            await updateReferenceDeviceOptions(index);
+            if (refVal.device_name) {
+                await updateReferenceTargetOptions(index);
+            }
+        }
+    }
+}
+
+// 更新参考值设置中的设备选项
+async function updateReferenceDeviceOptions(index) {
+    const assetName = referenceValues[index].asset_name;
+    const deviceSelect = document.getElementById(`refDevice_${index}`);
+    
+    if (!assetName || !deviceSelect) return;
+    
+    deviceSelect.innerHTML = '<option value="">选择设备...</option>';
+    
+    try {
+        const response = await fetch(`/api/devices?asset_name=${encodeURIComponent(assetName)}`);
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            result.data.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device;
+                option.textContent = device;
+                option.selected = referenceValues[index].device_name === device;
+                deviceSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('加载设备列表失败:', error);
+    }
+}
+
+// 更新参考值设置中的标靶选项
+async function updateReferenceTargetOptions(index) {
+    const assetName = referenceValues[index].asset_name;
+    const deviceName = referenceValues[index].device_name;
+    const targetSelect = document.getElementById(`refTarget_${index}`);
+    
+    if (!assetName || !deviceName || !targetSelect) return;
+    
+    targetSelect.innerHTML = '<option value="">选择标靶...</option>';
+    
+    try {
+        const response = await fetch(`/api/targets?asset_name=${encodeURIComponent(assetName)}&device_name=${encodeURIComponent(deviceName)}`);
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            result.data.forEach(target => {
+                const option = document.createElement('option');
+                option.value = target;
+                option.textContent = target;
+                option.selected = referenceValues[index].target_name === target;
+                targetSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('加载标靶列表失败:', error);
+    }
 }
 
 function updateReferenceValue(index, field, value) {
@@ -1719,7 +2008,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // 数据操作管理功能
 let dataOperations = [];
+let filteredOperations = [];
 let editingOperationId = null;
+let operationsCurrentPage = 1;
+let operationsPageSize = 20;
 
 function showDataOperationsModal() {
     document.getElementById('dataOperationsModal').style.display = 'block';
@@ -1769,36 +2061,142 @@ function hideAdvancedForm() {
     document.getElementById('operationEndTime').value = '';
 }
 
+// 存储可搜索下拉框实例
+let quickSelects = {
+    asset: null,
+    device: null,
+    target: null,
+    key: null
+};
+
 function populateQuickSelects() {
-    // 填充快速添加的选择器
-    const targetSelect = document.getElementById('quickTarget');
-    const keySelect = document.getElementById('quickKey');
-    
-    targetSelect.innerHTML = '<option value="">选择标靶</option>';
-    if (filterOptions.targets) {
-        filterOptions.targets.forEach(target => {
-            const option = document.createElement('option');
-            option.value = target;
-            option.textContent = target;
-            targetSelect.appendChild(option);
-        });
+    // 创建资产选择器
+    if (filterOptions.assets) {
+        quickSelects.asset = createSearchableSelect(
+            'quickAssetContainer',
+            filterOptions.assets || [],
+            '',
+            '选择资产',
+            async function(value) {
+                // 重置下级选择
+                if (quickSelects.device) quickSelects.device.setValue('');
+                if (quickSelects.target) quickSelects.target.setValue('');
+                
+                // 加载设备列表
+                if (value) {
+                    await loadQuickDevices(value);
+                } else {
+                    // 清空设备列表
+                    quickSelects.device = createSearchableSelect(
+                        'quickDeviceContainer',
+                        [],
+                        '',
+                        '先选择资产',
+                        null
+                    );
+                    quickSelects.target = createSearchableSelect(
+                        'quickTargetContainer',
+                        [],
+                        '',
+                        '先选择设备',
+                        null
+                    );
+                }
+            }
+        );
     }
     
-    keySelect.innerHTML = '<option value="">选择指标</option>';
+    // 创建空的设备选择器
+    quickSelects.device = createSearchableSelect(
+        'quickDeviceContainer',
+        [],
+        '',
+        '先选择资产',
+        null
+    );
+    
+    // 创建空的标靶选择器
+    quickSelects.target = createSearchableSelect(
+        'quickTargetContainer',
+        [],
+        '',
+        '先选择设备',
+        null
+    );
+    
+    // 创建指标选择器
     if (filterOptions.key_names) {
-        filterOptions.key_names.forEach(key => {
-            const option = document.createElement('option');
-            option.value = key;
-            option.textContent = key;
-            keySelect.appendChild(option);
-        });
+        quickSelects.key = createSearchableSelect(
+            'quickKeyContainer',
+            filterOptions.key_names || [],
+            '',
+            '选择指标',
+            null
+        );
     }
 }
 
+// 加载设备列表
+async function loadQuickDevices(assetName) {
+    try {
+        const response = await fetch(`/api/devices?asset_name=${encodeURIComponent(assetName)}`);
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            quickSelects.device = createSearchableSelect(
+                'quickDeviceContainer',
+                result.data,
+                '',
+                '选择设备',
+                async function(value) {
+                    // 重置标靶选择
+                    if (quickSelects.target) quickSelects.target.setValue('');
+                    
+                    // 加载标靶列表
+                    if (value) {
+                        await loadQuickTargets(assetName, value);
+                    } else {
+                        quickSelects.target = createSearchableSelect(
+                            'quickTargetContainer',
+                            [],
+                            '',
+                            '先选择设备',
+                            null
+                        );
+                    }
+                }
+            );
+        }
+    } catch (error) {
+        console.error('加载设备列表失败:', error);
+    }
+}
+
+// 加载标靶列表
+async function loadQuickTargets(assetName, deviceName) {
+    try {
+        const response = await fetch(`/api/targets?asset_name=${encodeURIComponent(assetName)}&device_name=${encodeURIComponent(deviceName)}`);
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            quickSelects.target = createSearchableSelect(
+                'quickTargetContainer',
+                result.data,
+                '',
+                '选择标靶',
+                null
+            );
+        }
+    } catch (error) {
+        console.error('加载标靶列表失败:', error);
+    }
+}
+
+
 // 快速添加操作
 async function quickAddOperation() {
-    const targetName = document.getElementById('quickTarget').value;
-    const keyName = document.getElementById('quickKey').value;
+    const targetName = quickSelects.target ? quickSelects.target.getValue() : '';
+    const keyName = quickSelects.key ? quickSelects.key.getValue() : '';
     const operationType = document.getElementById('quickOperation').value;
     const value = parseFloat(document.getElementById('quickValue').value);
     
@@ -1937,7 +2335,7 @@ async function refreshOperationsList() {
         
         if (result.success) {
             dataOperations = result.data;
-            renderOperationsList();
+            filterOperations(); // 应用当前筛选条件
         } else {
             showError('获取操作列表失败: ' + result.error);
         }
@@ -1948,13 +2346,36 @@ async function refreshOperationsList() {
 
 function renderOperationsList() {
     const tbody = document.getElementById('operationsTableBody');
+    const displayData = filteredOperations.length > 0 || hasActiveFilters() ? filteredOperations : dataOperations;
     
-    if (dataOperations.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center; color: #999;">暂无数据操作记录</td></tr>';
+    if (displayData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center; color: #999;">暂无符合条件的操作记录</td></tr>';
+        document.getElementById('operationsTotalCount').textContent = '0';
+        document.getElementById('operationsTotalPages').textContent = '1';
+        document.getElementById('operationsCurrentPage').value = '1';
         return;
     }
     
-    tbody.innerHTML = dataOperations.map(op => {
+    // 计算分页
+    const totalCount = displayData.length;
+    const totalPages = Math.ceil(totalCount / operationsPageSize);
+    
+    // 确保当前页不超过总页数
+    if (operationsCurrentPage > totalPages) {
+        operationsCurrentPage = Math.max(1, totalPages);
+    }
+    
+    const startIndex = (operationsCurrentPage - 1) * operationsPageSize;
+    const endIndex = Math.min(startIndex + operationsPageSize, totalCount);
+    const pageData = displayData.slice(startIndex, endIndex);
+    
+    // 更新分页信息
+    document.getElementById('operationsTotalCount').textContent = totalCount;
+    document.getElementById('operationsTotalPages').textContent = totalPages;
+    document.getElementById('operationsCurrentPage').value = operationsCurrentPage;
+    document.getElementById('operationsCurrentPage').max = totalPages;
+    
+    tbody.innerHTML = pageData.map(op => {
         const operationSymbol = {
             'Add': '+',
             'Subtract': '-',
@@ -2350,6 +2771,116 @@ async function handleImportFile(event) {
     
     // 清空文件选择
     event.target.value = '';
+}
+
+// 筛选功能
+function filterOperations() {
+    const searchText = document.getElementById('operationsSearchInput').value.toLowerCase();
+    const filterType = document.getElementById('operationsFilterType').value;
+    const filterStatus = document.getElementById('operationsFilterStatus').value;
+    
+    filteredOperations = dataOperations.filter(op => {
+        // 搜索文本筛选
+        if (searchText) {
+            const searchMatch = 
+                op.target_name.toLowerCase().includes(searchText) ||
+                op.key_name.toLowerCase().includes(searchText) ||
+                (op.name && op.name.toLowerCase().includes(searchText)) ||
+                (op.description && op.description.toLowerCase().includes(searchText));
+            
+            if (!searchMatch) return false;
+        }
+        
+        // 操作类型筛选
+        if (filterType && op.operation_type !== filterType) {
+            return false;
+        }
+        
+        // 状态筛选
+        if (filterStatus) {
+            if (filterStatus === 'active' && !op.is_active) return false;
+            if (filterStatus === 'inactive' && op.is_active) return false;
+        }
+        
+        return true;
+    });
+    
+    // 重置到第一页
+    operationsCurrentPage = 1;
+    renderOperationsList();
+}
+
+function hasActiveFilters() {
+    const searchText = document.getElementById('operationsSearchInput').value;
+    const filterType = document.getElementById('operationsFilterType').value;
+    const filterStatus = document.getElementById('operationsFilterStatus').value;
+    
+    return searchText || filterType || filterStatus;
+}
+
+function clearOperationsFilter() {
+    document.getElementById('operationsSearchInput').value = '';
+    document.getElementById('operationsFilterType').value = '';
+    document.getElementById('operationsFilterStatus').value = '';
+    
+    filteredOperations = [];
+    operationsCurrentPage = 1;
+    renderOperationsList();
+}
+
+// 分页控制函数
+function changeOperationsPageSize() {
+    const pageSize = document.getElementById('operationsPageSize').value;
+    operationsPageSize = parseInt(pageSize);
+    operationsCurrentPage = 1; // 重置到第一页
+    renderOperationsList();
+}
+
+function firstPageOperations() {
+    if (operationsCurrentPage !== 1) {
+        operationsCurrentPage = 1;
+        renderOperationsList();
+    }
+}
+
+function prevPageOperations() {
+    if (operationsCurrentPage > 1) {
+        operationsCurrentPage--;
+        renderOperationsList();
+    }
+}
+
+function nextPageOperations() {
+    const displayData = filteredOperations.length > 0 || hasActiveFilters() ? filteredOperations : dataOperations;
+    const totalPages = Math.ceil(displayData.length / operationsPageSize);
+    if (operationsCurrentPage < totalPages) {
+        operationsCurrentPage++;
+        renderOperationsList();
+    }
+}
+
+function lastPageOperations() {
+    const displayData = filteredOperations.length > 0 || hasActiveFilters() ? filteredOperations : dataOperations;
+    const totalPages = Math.ceil(displayData.length / operationsPageSize);
+    if (operationsCurrentPage !== totalPages && totalPages > 0) {
+        operationsCurrentPage = totalPages;
+        renderOperationsList();
+    }
+}
+
+function goToPageOperations() {
+    const pageInput = document.getElementById('operationsCurrentPage');
+    const page = parseInt(pageInput.value);
+    const displayData = filteredOperations.length > 0 || hasActiveFilters() ? filteredOperations : dataOperations;
+    const totalPages = Math.ceil(displayData.length / operationsPageSize);
+    
+    if (page >= 1 && page <= totalPages) {
+        operationsCurrentPage = page;
+        renderOperationsList();
+    } else {
+        // 恢复原值
+        pageInput.value = operationsCurrentPage;
+    }
 }
 
 // 文件结束

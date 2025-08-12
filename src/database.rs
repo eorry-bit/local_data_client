@@ -117,6 +117,7 @@ pub enum OperationType {
     Subtract,
     Multiply,
     Divide,
+    Offset, // 偏移纠正
 }
 
 impl OperationType {
@@ -126,6 +127,7 @@ impl OperationType {
             OperationType::Subtract => "subtract",
             OperationType::Multiply => "multiply",
             OperationType::Divide => "divide",
+            OperationType::Offset => "offset",
         }
     }
 
@@ -135,6 +137,7 @@ impl OperationType {
             "subtract" => Some(OperationType::Subtract),
             "multiply" => Some(OperationType::Multiply),
             "divide" => Some(OperationType::Divide),
+            "offset" => Some(OperationType::Offset),
             _ => None,
         }
     }
@@ -1175,7 +1178,8 @@ impl DatabaseManager {
                         } else {
                             item.value
                         }
-                    }
+                    },
+                    OperationType::Offset => item.value + operation.value, // 偏移等同于加法
                 };
             }
         }

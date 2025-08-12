@@ -1,5 +1,6 @@
 mod database;
 mod api;
+mod anomaly_detection;
 
 use axum::Router;
 use tower::ServiceBuilder;

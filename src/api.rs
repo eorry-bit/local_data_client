@@ -13,6 +13,7 @@ use std::convert::Infallible;
 use tokio_stream::StreamExt;
 
 use crate::database::{DatabaseManager, FilterOptions, QueryParams, TelemetryResponse, CustomFilter, SamplingConfig, SamplingMethod, ReferenceValue, TimeOfDayFilter, TimeRange, DataOperation, OperationType};
+use crate::anomaly_detection::{AnomalyDetector, AnomalyDetectionConfig};
 
 pub type AppState = Arc<DatabaseManager>;
 
@@ -107,6 +108,8 @@ pub fn create_router(db_manager: DatabaseManager) -> Router {
         .route("/api/operations/import", post(import_operations))
         .route("/api/operations/:id", put(update_operation).delete(delete_operation))
         .route("/api/operations/:id/toggle", post(toggle_operation))
+        .route("/api/anomaly/detect", post(detect_anomalies))
+        .route("/api/anomaly/detect-all", post(detect_all_anomalies))
         .with_state(state)
 }
 
@@ -383,6 +386,7 @@ async fn create_operation(
             OperationType::Subtract => "-",
             OperationType::Multiply => "×",
             OperationType::Divide => "÷",
+            OperationType::Offset => "±",
         };
         Some(format!("{} {} {}", request.key_name, op_symbol, request.value))
     });
@@ -591,6 +595,7 @@ async fn import_operations(
                     OperationType::Subtract => "-",
                     OperationType::Multiply => "×",
                     OperationType::Divide => "÷",
+                    OperationType::Offset => "±",
                 };
                 Some(format!("{} {} {}", import_op.key_name, op_symbol, import_op.value))
             });
@@ -747,4 +752,115 @@ async fn get_telemetry_data_stream(
     };
 
     Sse::new(stream)
+}
+
+// 异常检测相关的请求结构
+#[derive(Debug, Deserialize)]
+pub struct AnomalyDetectionRequest {
+    pub target_name: String,
+    pub key_name: String,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub sensitivity: Option<f64>,
+    pub auto_correction: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnomalyDetectionAllRequest {
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub sensitivity: Option<f64>,
+    pub auto_correction: Option<bool>,
+}
+
+// 检测指定标靶和指标的异常
+async fn detect_anomalies(
+    State(db): State<AppState>,
+    Json(request): Json<AnomalyDetectionRequest>,
+) -> Result<Json<ApiResponse<Vec<crate::anomaly_detection::DetectedAnomaly>>>, StatusCode> {
+    // 解析时间参数
+    let start_time = if let Some(start_str) = &request.start_time {
+        match DateTime::parse_from_rfc3339(start_str) {
+            Ok(dt) => Some(dt.with_timezone(&Utc)),
+            Err(_) => return Ok(Json(ApiResponse::error("Invalid start_time format".to_string()))),
+        }
+    } else {
+        None
+    };
+
+    let end_time = if let Some(end_str) = &request.end_time {
+        match DateTime::parse_from_rfc3339(end_str) {
+            Ok(dt) => Some(dt.with_timezone(&Utc)),
+            Err(_) => return Ok(Json(ApiResponse::error("Invalid end_time format".to_string()))),
+        }
+    } else {
+        None
+    };
+
+    // 创建检测配置
+    let mut config = AnomalyDetectionConfig::default();
+    if let Some(sensitivity) = request.sensitivity {
+        config.sensitivity = sensitivity;
+    }
+    if let Some(auto_correction) = request.auto_correction {
+        config.auto_correction = auto_correction;
+    }
+
+    // 创建检测器
+    let detector = AnomalyDetector::new(config);
+
+    // 执行异常检测
+    match detector.detect_anomalies(&db, &request.target_name, &request.key_name, start_time, end_time).await {
+        Ok(anomalies) => Ok(Json(ApiResponse::success(anomalies))),
+        Err(e) => {
+            eprintln!("Error detecting anomalies: {}", e);
+            Ok(Json(ApiResponse::error(format!("Failed to detect anomalies: {}", e))))
+        }
+    }
+}
+
+// 检测所有标靶和指标的异常
+async fn detect_all_anomalies(
+    State(db): State<AppState>,
+    Json(request): Json<AnomalyDetectionAllRequest>,
+) -> Result<Json<ApiResponse<crate::anomaly_detection::AnomalyDetectionResult>>, StatusCode> {
+    // 解析时间参数
+    let start_time = if let Some(start_str) = &request.start_time {
+        match DateTime::parse_from_rfc3339(start_str) {
+            Ok(dt) => Some(dt.with_timezone(&Utc)),
+            Err(_) => return Ok(Json(ApiResponse::error("Invalid start_time format".to_string()))),
+        }
+    } else {
+        None
+    };
+
+    let end_time = if let Some(end_str) = &request.end_time {
+        match DateTime::parse_from_rfc3339(end_str) {
+            Ok(dt) => Some(dt.with_timezone(&Utc)),
+            Err(_) => return Ok(Json(ApiResponse::error("Invalid end_time format".to_string()))),
+        }
+    } else {
+        None
+    };
+
+    // 创建检测配置
+    let mut config = AnomalyDetectionConfig::default();
+    if let Some(sensitivity) = request.sensitivity {
+        config.sensitivity = sensitivity;
+    }
+    if let Some(auto_correction) = request.auto_correction {
+        config.auto_correction = auto_correction;
+    }
+
+    // 创建检测器
+    let detector = AnomalyDetector::new(config);
+
+    // 执行全面异常检测
+    match detector.detect_all_anomalies(&db, start_time, end_time).await {
+        Ok(result) => Ok(Json(ApiResponse::success(result))),
+        Err(e) => {
+            eprintln!("Error detecting all anomalies: {}", e);
+            Ok(Json(ApiResponse::error(format!("Failed to detect anomalies: {}", e))))
+        }
+    }
 }

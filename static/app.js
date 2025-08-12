@@ -128,7 +128,7 @@ function onTimeFilterToggle() {
             // 设置默认时间段
             timeRanges = [{ start: '07:00', end: '22:00' }];
         }
-        showSuccess('每日时间段过滤已启用，点击"配置时间段"设置具体时间');
+        // 移除自动弹窗提示
     }
 }
 
@@ -148,7 +148,7 @@ function onPerformanceModeToggle() {
         dataLimit.value = '10000';
         samplingInterval.value = '3600000';
         samplingMethod.value = 'avg';
-        showSuccess('数据聚合模式已启用：限制1万数据点，1小时时间窗口平均值聚合');
+        // 移除自动弹窗提示
     } else {
         dataLimit.value = '';
         samplingInterval.value = '';
@@ -597,8 +597,11 @@ function exportToExcel() {
             '位移（mm）': item.value
         }));
 
-        // 创建数据透视表
+        // 创建数据透视表（行转列格式）
         const pivotData = createPivotTable(currentData);
+        
+        // 创建统计透视表
+        const statisticsData = createStatisticsPivotTable(currentData);
 
         // 创建统计汇总表
         const summaryData = createSummaryTable(currentData);
@@ -619,10 +622,22 @@ function exportToExcel() {
         ws1['!cols'] = colWidths1;
         XLSX.utils.book_append_sheet(wb, ws1, '原始数据');
 
-        // 数据透视表工作表
+        // 数据透视表工作表（行转列格式）
         const ws2 = XLSX.utils.json_to_sheet(pivotData);
-        const colWidths2 = [
+        // 动态设置列宽：第一列时间列较宽，其他数据列标准宽度
+        const colWidths2 = [{ wch: 20 }]; // 时间列
+        // 为每个数据列设置宽度
+        for (let i = 1; i < Object.keys(pivotData[0] || {}).length; i++) {
+            colWidths2.push({ wch: 15 });
+        }
+        ws2['!cols'] = colWidths2;
+        XLSX.utils.book_append_sheet(wb, ws2, '数据透视表');
+        
+        // 统计透视表工作表
+        const ws3 = XLSX.utils.json_to_sheet(statisticsData);
+        const colWidths3 = [
             { wch: 15 }, // 标靶名称
+            { wch: 15 }, // 数据类型
             { wch: 12 }, // 数据点数
             { wch: 12 }, // 平均值
             { wch: 12 }, // 最大值
@@ -631,17 +646,17 @@ function exportToExcel() {
             { wch: 20 }, // 最早时间
             { wch: 20 }  // 最晚时间
         ];
-        ws2['!cols'] = colWidths2;
-        XLSX.utils.book_append_sheet(wb, ws2, '数据透视表');
+        ws3['!cols'] = colWidths3;
+        XLSX.utils.book_append_sheet(wb, ws3, '统计分析');
 
         // 统计汇总工作表
-        const ws3 = XLSX.utils.json_to_sheet(summaryData);
-        const colWidths3 = [
+        const ws4 = XLSX.utils.json_to_sheet(summaryData);
+        const colWidths4 = [
             { wch: 20 }, // 统计项
             { wch: 15 }  // 值
         ];
-        ws3['!cols'] = colWidths3;
-        XLSX.utils.book_append_sheet(wb, ws3, '统计汇总');
+        ws4['!cols'] = colWidths4;
+        XLSX.utils.book_append_sheet(wb, ws4, '统计汇总');
 
         // 生成文件名
         const now = new Date();
@@ -682,6 +697,59 @@ function formatDateForFilename(date) {
 
 // 创建数据透视表
 function createPivotTable(data) {
+    // 创建行转列的数据透视表
+    // 时间为行，标靶-数据类型组合为列
+    
+    // 1. 收集所有唯一的时间点和列名
+    const timeMap = new Map(); // 时间 -> {列名 -> 值}
+    const columnNames = new Set(); // 所有唯一的列名
+    
+    data.forEach(item => {
+        // 格式化时间（精确到分钟或小时，根据数据密度）
+        const timeStr = formatDateForExcel(new Date(item.timestamp));
+        const columnName = `${item.target_name}-${item.key_name}`;
+        
+        columnNames.add(columnName);
+        
+        if (!timeMap.has(timeStr)) {
+            timeMap.set(timeStr, {});
+        }
+        
+        // 如果同一时间有多个值，取平均值
+        if (timeMap.get(timeStr)[columnName]) {
+            const existing = timeMap.get(timeStr)[columnName];
+            timeMap.get(timeStr)[columnName] = (existing + item.value) / 2;
+        } else {
+            timeMap.get(timeStr)[columnName] = item.value;
+        }
+    });
+    
+    // 2. 将列名排序
+    const sortedColumns = Array.from(columnNames).sort();
+    
+    // 3. 构建透视表数据
+    const pivotData = [];
+    
+    // 将时间排序
+    const sortedTimes = Array.from(timeMap.keys()).sort();
+    
+    sortedTimes.forEach(time => {
+        const row = { '时间': time };
+        const timeData = timeMap.get(time);
+        
+        // 为每个列添加值，如果没有值则留空
+        sortedColumns.forEach(col => {
+            row[col] = timeData[col] !== undefined ? parseFloat(timeData[col].toFixed(3)) : '';
+        });
+        
+        pivotData.push(row);
+    });
+    
+    return pivotData;
+}
+
+// 创建传统的统计透视表（保留原功能）
+function createStatisticsPivotTable(data) {
     const pivotMap = new Map();
 
     // 按标靶名称和数据类型分组统计
@@ -1747,3 +1815,5 @@ async function handleImportFile(event) {
     // 清空文件选择
     event.target.value = '';
 }
+
+// 文件结束

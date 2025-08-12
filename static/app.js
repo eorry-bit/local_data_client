@@ -700,9 +700,24 @@ function exportToExcel() {
         ws4['!cols'] = colWidths4;
         XLSX.utils.book_append_sheet(wb, ws4, '统计汇总');
 
-        // 生成文件名
+        // 生成包含标靶和指标信息的文件名
+        const targets = [...new Set(currentData.map(item => item.target_name))];
+        const keyNames = [...new Set(currentData.map(item => item.key_name))];
+        
+        // 限制文件名长度，避免过长
+        let targetStr = targets.slice(0, 3).join('-');
+        if (targets.length > 3) {
+            targetStr += `等${targets.length}个`;
+        }
+        
+        let keyStr = keyNames.slice(0, 2).join('-');
+        if (keyNames.length > 2) {
+            keyStr += `等${keyNames.length}个`;
+        }
+        
+        // 组合文件名：资产_设备_标靶_指标_时间
         const now = new Date();
-        const fileName = `遥测数据分析_${formatDateForFilename(now)}.xlsx`;
+        const fileName = `遥测数据_${currentData[0].asset_name}_${currentData[0].device_name}_${targetStr}_${keyStr}_${formatDateForFilename(now)}.xlsx`;
 
         // 导出文件
         XLSX.writeFile(wb, fileName);
@@ -735,6 +750,425 @@ function formatDateForFilename(date) {
     const minutes = String(date.getMinutes()).padStart(2, '0');
 
     return `${year}${month}${day}_${hours}${minutes}`;
+}
+
+// 导出HTML功能
+function exportToHTML() {
+    if (currentData.length === 0) {
+        showError('没有数据可以导出');
+        return;
+    }
+
+    try {
+        // 按标靶和数据类型组合分组数据（与updateChart相同的逻辑）
+        const groupedData = {};
+        const allGroupKeys = [];
+        
+        // 先收集所有的组合键，保证颜色分配的一致性
+        currentData.forEach(item => {
+            const groupKey = `${item.target_name}-${item.key_name}`;
+            if (!allGroupKeys.includes(groupKey)) {
+                allGroupKeys.push(groupKey);
+            }
+        });
+        
+        // 对组合键排序，确保颜色分配稳定
+        allGroupKeys.sort();
+        
+        // 定义颜色调色板（更丰富的颜色）
+        const colorPalette = [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+            '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5'
+        ];
+        
+        // 收集所有数据类型用于标题
+        const keyNamesSet = new Set();
+        
+        currentData.forEach(item => {
+            const groupKey = `${item.target_name}-${item.key_name}`;
+            keyNamesSet.add(item.key_name);
+            
+            if (!groupedData[groupKey]) {
+                // 每个组合使用不同的颜色
+                const colorIndex = allGroupKeys.indexOf(groupKey);
+                const color = colorPalette[colorIndex % colorPalette.length];
+                
+                groupedData[groupKey] = {
+                    x: [],
+                    y: [],
+                    name: `${item.target_name} (${item.key_name})`,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    line: { 
+                        width: 2,
+                        color: color
+                    },
+                    marker: { 
+                        size: 4,
+                        color: color
+                    },
+                    hovertemplate: '<b>%{fullData.name}</b><br>' +
+                                  '时间: %{x|%Y/%m/%d %H:%M:%S}<br>' +
+                                  '位移（mm）: %{y}<br>' +
+                                  '<extra></extra>'
+                };
+            }
+            groupedData[groupKey].x.push(new Date(item.timestamp));
+            groupedData[groupKey].y.push(item.value);
+        });
+        
+        // 转换为数组并排序，用于标题显示
+        const keyNamesList = Array.from(keyNamesSet).sort();
+        
+        const traces = Object.values(groupedData);
+        
+        // 动态生成标题，包含所有选中的数据类型
+        const keyNamesDisplay = keyNamesList.join(', ');
+        const layout = {
+            title: {
+                text: `${currentData[0].asset_name} - ${currentData[0].device_name} - [${keyNamesDisplay}]`,
+                font: { size: 18 }
+            },
+            xaxis: {
+                title: '时间',
+                type: 'date',
+                tickformat: '%Y/%m/%d %H:%M:%S',
+                hoverformat: '%Y/%m/%d %H:%M:%S'
+            },
+            yaxis: {
+                title: '位移（mm）'
+            },
+            hovermode: 'x unified',
+            showlegend: true,
+            legend: {
+                orientation: 'h',
+                y: -0.2
+            },
+            margin: {
+                l: 60,
+                r: 30,
+                t: 60,
+                b: 100
+            }
+        };
+
+        const config = {
+            responsive: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+            displaylogo: false,
+            locale: 'zh-CN'
+        };
+
+        // 创建数据统计表
+        const statsHtml = createHTMLStatsTable(currentData);
+
+        // 生成HTML内容
+        const htmlContent = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>遥测数据分析报告 - ${formatDateForFilename(new Date())}</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" charset="utf-8"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 300;
+        }
+        .report-info {
+            padding: 15px 20px;
+            background: #fafafa;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 14px;
+            color: #666;
+        }
+        .chart-container {
+            padding: 20px;
+            min-height: 600px;
+        }
+        .stats-section {
+            padding: 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .data-table th {
+            background: #667eea;
+            color: white;
+            padding: 10px;
+            text-align: left;
+            font-weight: 500;
+        }
+        .data-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .data-table tr:hover {
+            background: #f5f5f5;
+        }
+        .footer {
+            padding: 15px 20px;
+            background: #fafafa;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>遥测数据分析报告</h1>
+        </div>
+        
+        <div class="report-info">
+            <strong>生成时间：</strong>${formatDateForExcel(new Date())} | 
+            <strong>数据点数：</strong>${currentData.length.toLocaleString()} | 
+            <strong>资产：</strong>${currentData[0].asset_name} | 
+            <strong>设备：</strong>${currentData[0].device_name}
+        </div>
+        
+        <div class="chart-container">
+            <div id="myChart"></div>
+        </div>
+        
+        <div class="stats-section">
+            <h2 style="margin-top: 0; color: #333;">数据统计分析</h2>
+            ${statsHtml}
+        </div>
+        
+        <div class="footer">
+            <p>本报告由遥测数据可视化系统自动生成 | 导出时间：${formatDateForExcel(new Date())}</p>
+        </div>
+    </div>
+    
+    <script>
+        // 图表数据
+        const data = ${JSON.stringify(traces)};
+        const layout = ${JSON.stringify(layout)};
+        const config = ${JSON.stringify(config)};
+        
+        // 渲染图表
+        Plotly.newPlot('myChart', data, layout, config);
+        
+        // 响应式调整
+        window.addEventListener('resize', function() {
+            Plotly.Plots.resize('myChart');
+        });
+    </script>
+</body>
+</html>`;
+
+        // 生成包含标靶和指标信息的文件名
+        const targets = [...new Set(currentData.map(item => item.target_name))];
+        const keyNames = [...new Set(currentData.map(item => item.key_name))];
+        
+        // 限制文件名长度，避免过长
+        let targetStr = targets.slice(0, 3).join('-');
+        if (targets.length > 3) {
+            targetStr += `等${targets.length}个`;
+        }
+        
+        let keyStr = keyNames.slice(0, 2).join('-');
+        if (keyNames.length > 2) {
+            keyStr += `等${keyNames.length}个`;
+        }
+        
+        // 组合文件名：资产_设备_标靶_指标_时间
+        const fileName = `遥测数据_${currentData[0].asset_name}_${currentData[0].device_name}_${targetStr}_${keyStr}_${formatDateForFilename(new Date())}.html`;
+        
+        // 创建Blob并下载
+        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showSuccess('HTML报告已成功导出，包含可交互式图表');
+    } catch (error) {
+        showError('导出HTML失败: ' + error.message);
+    }
+}
+
+// 创建HTML统计表格
+function createHTMLStatsTable(data) {
+    // 按标靶和数据类型分组统计
+    const pivotMap = new Map();
+
+    data.forEach(item => {
+        const key = `${item.target_name}_${item.key_name}`;
+        if (!pivotMap.has(key)) {
+            pivotMap.set(key, {
+                target_name: item.target_name,
+                key_name: item.key_name,
+                values: [],
+                timestamps: []
+            });
+        }
+        pivotMap.get(key).values.push(item.value);
+        pivotMap.get(key).timestamps.push(new Date(item.timestamp));
+    });
+
+    // 计算统计信息
+    const statsRows = [];
+    pivotMap.forEach((group, key) => {
+        const values = group.values;
+        const timestamps = group.timestamps;
+
+        if (values.length > 0) {
+            const sum = values.reduce((a, b) => a + b, 0);
+            const avg = sum / values.length;
+            const max = Math.max(...values);
+            const min = Math.min(...values);
+            const stdDev = Math.sqrt(values.reduce((sq, n) => sq + Math.pow(n - avg, 2), 0) / values.length);
+
+            statsRows.push({
+                target: group.target_name,
+                key: group.key_name,
+                count: values.length,
+                avg: avg.toFixed(3),
+                max: max.toFixed(3),
+                min: min.toFixed(3),
+                stdDev: stdDev.toFixed(3),
+                range: (max - min).toFixed(3)
+            });
+        }
+    });
+
+    // 生成统计表格HTML
+    let tableHtml = `
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>标靶名称</th>
+                    <th>数据类型</th>
+                    <th>数据点数</th>
+                    <th>平均值(mm)</th>
+                    <th>最大值(mm)</th>
+                    <th>最小值(mm)</th>
+                    <th>标准差</th>
+                    <th>极差(mm)</th>
+                </tr>
+            </thead>
+            <tbody>`;
+    
+    statsRows.forEach(row => {
+        tableHtml += `
+                <tr>
+                    <td>${row.target}</td>
+                    <td>${row.key}</td>
+                    <td>${row.count.toLocaleString()}</td>
+                    <td>${row.avg}</td>
+                    <td>${row.max}</td>
+                    <td>${row.min}</td>
+                    <td>${row.stdDev}</td>
+                    <td>${row.range}</td>
+                </tr>`;
+    });
+    
+    tableHtml += `
+            </tbody>
+        </table>`;
+    
+    // 生成总体统计卡片
+    const timestamps = data.map(item => new Date(item.timestamp));
+    const values = data.map(item => item.value);
+    const targets = [...new Set(data.map(item => item.target_name))];
+    const keyNames = [...new Set(data.map(item => item.key_name))];
+    
+    const minTime = new Date(Math.min(...timestamps));
+    const maxTime = new Date(Math.max(...timestamps));
+    const timeSpan = (maxTime - minTime) / (1000 * 60 * 60); // 小时
+    
+    const overallAvg = values.reduce((a, b) => a + b, 0) / values.length;
+    const overallMax = Math.max(...values);
+    const overallMin = Math.min(...values);
+    
+    const statsCards = `
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">总数据点</div>
+                <div class="stat-value">${data.length.toLocaleString()}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">时间跨度</div>
+                <div class="stat-value">${timeSpan.toFixed(1)} 小时</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">标靶数量</div>
+                <div class="stat-value">${targets.length}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">数据类型</div>
+                <div class="stat-value">${keyNames.length}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">总体平均值</div>
+                <div class="stat-value">${overallAvg.toFixed(3)} mm</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">总体极差</div>
+                <div class="stat-value">${(overallMax - overallMin).toFixed(3)} mm</div>
+            </div>
+        </div>`;
+    
+    return statsCards + tableHtml;
 }
 
 // 创建数据透视表
@@ -878,7 +1312,11 @@ function createSummaryTable(data) {
 // 更新导出按钮状态
 function updateExportButton() {
     const exportBtn = document.getElementById('exportBtn');
+    const exportHTMLBtn = document.getElementById('exportHTMLBtn');
     exportBtn.disabled = currentData.length === 0;
+    if (exportHTMLBtn) {
+        exportHTMLBtn.disabled = currentData.length === 0;
+    }
 }
 
 // 更新数据统计显示

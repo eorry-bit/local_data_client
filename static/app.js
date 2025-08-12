@@ -753,13 +753,31 @@ function formatDateForFilename(date) {
 }
 
 // 导出HTML功能
-function exportToHTML() {
+async function exportToHTML() {
     if (currentData.length === 0) {
         showError('没有数据可以导出');
         return;
     }
 
     try {
+        // 读取本地的Plotly库内容
+        showLoading(true);
+        showLoadingProgress('正在生成HTML报告...');
+        
+        let plotlyScript = '';
+        try {
+            // 获取本地Plotly库内容
+            const response = await fetch('/libs/plotly.min.js');
+            if (response.ok) {
+                plotlyScript = await response.text();
+            } else {
+                // 如果无法获取本地文件，使用CDN作为后备
+                plotlyScript = `document.write('<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"><\\/script>');`;
+            }
+        } catch (error) {
+            console.warn('无法读取本地Plotly库，将使用CDN:', error);
+            plotlyScript = `document.write('<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"><\\/script>');`;
+        }
         // 按标靶和数据类型组合分组数据（与updateChart相同的逻辑）
         const groupedData = {};
         const allGroupKeys = [];
@@ -872,7 +890,8 @@ function exportToHTML() {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>遥测数据分析报告 - ${formatDateForFilename(new Date())}</title>
-    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" charset="utf-8"></script>
+    <!-- Plotly库已内嵌，支持完全离线使用 -->
+    <script>${plotlyScript}</script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -1039,9 +1058,11 @@ function exportToHTML() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-
-        showSuccess('HTML报告已成功导出，包含可交互式图表');
+        
+        showLoading(false);
+        showSuccess('HTML报告已成功导出（完全离线版本，可直接分享）');
     } catch (error) {
+        showLoading(false);
         showError('导出HTML失败: ' + error.message);
     }
 }

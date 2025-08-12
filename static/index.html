@@ -131,6 +131,76 @@
             border-bottom: 1px solid #e0e0e0;
         }
         
+        .control-section {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #667eea;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .section-icon {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .collapsible-section {
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .section-content {
+            transition: all 0.3s ease;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .action-buttons .btn {
+            background: white;
+            color: #667eea;
+            font-weight: 500;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .action-buttons .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .btn-primary {
+            background: #28a745 !important;
+            color: white !important;
+        }
+        
+        .btn-export {
+            background: #17a2b8 !important;
+            color: white !important;
+        }
+        
         .filter-row {
             display: flex;
             gap: 15px;
@@ -336,6 +406,21 @@
             max-width: 600px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
+        
+        .modal-content-large {
+            max-width: 900px !important;
+            max-height: 90vh !important;
+            display: flex !important;
+            flex-direction: column !important;
+            margin: 2% auto !important;
+        }
+        
+        .modal-body-scrollable {
+            overflow-y: auto !important;
+            flex: 1 !important;
+            max-height: calc(90vh - 120px) !important;
+            padding: 20px;
+        }
 
         .modal-header {
             padding: 20px;
@@ -424,150 +509,183 @@
         </div>
         
         <div class="controls">
-            <div class="filter-row">
-                <div class="filter-group">
-                    <label>资产名称:</label>
-                    <div id="mainAssetContainer"></div>
+            <!-- 数据选择区域 -->
+            <div class="control-section">
+                <div class="section-title">
+                    <span class="section-icon">📊</span>
+                    <span>数据选择</span>
                 </div>
-                
-                <div class="filter-group">
-                    <label>设备名称:</label>
-                    <div id="mainDeviceContainer"></div>
-                </div>
-                
-                <div class="filter-group">
-                    <label>数据类型 (可多选):</label>
-                    <div class="target-checkboxes" id="keyNameCheckboxes">
-                        <div class="info">正在加载数据类型列表...</div>
+                <div class="filter-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div class="filter-group">
+                        <label>资产名称:</label>
+                        <div id="mainAssetContainer"></div>
                     </div>
-                </div>
-
-                <div class="filter-group">
-                    <label>
-                        <input type="checkbox" id="removeOutliers"> 去除异常数据
-                    </label>
-                    <select id="outlierMethod" disabled>
-                        <option value="iqr">IQR方法 (四分位距)</option>
-                        <option value="zscore">Z-Score方法 (标准差)</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="filter-row">
-                <div class="filter-group">
-                    <label>
-                        <input type="checkbox" id="enableCustomFilter"> 自定义数值过滤
-                    </label>
-                </div>
-
-                <div class="filter-group">
-                    <label for="minValue">最小值:</label>
-                    <input type="number" id="minValue" step="any" placeholder="例如: -1000" disabled>
-                </div>
-
-                <div class="filter-group">
-                    <label for="maxValue">最大值:</label>
-                    <input type="number" id="maxValue" step="any" placeholder="例如: 1000" disabled>
-                </div>
-
-                <div class="filter-group">
-                    <label for="excludeValues">排除值:</label>
-                    <input type="text" id="excludeValues" placeholder="例如: 0,999,9999" disabled>
-                </div>
-            </div>
-
-            <div class="filter-row">
-                <div class="filter-group">
-                    <label>
-                        <input type="checkbox" id="enableTimeFilter"> 每日时间段过滤
-                    </label>
-                    <button class="btn" onclick="showTimeRangeModal()" id="configTimeRanges" disabled>配置时间段</button>
-                </div>
-            </div>
-
-            <div class="filter-row">
-                <div class="filter-group">
-                    <label>
-                        <input type="checkbox" id="enablePerformanceMode"> 数据聚合模式
-                    </label>
-                </div>
-
-                <div class="filter-group">
-                    <label for="dataLimit">数据点限制:</label>
-                    <select id="dataLimit" disabled>
-                        <option value="10000">1万点 (推荐)</option>
-                        <option value="50000">5万点</option>
-                        <option value="100000">10万点</option>
-                        <option value="500000">50万点</option>
-                    </select>
-                </div>
-
-                <div class="filter-group">
-                    <label for="samplingInterval">聚合时间窗口:</label>
-                    <select id="samplingInterval" disabled>
-                        <option value="">不聚合</option>
-                        <option value="1000">1秒</option>
-                        <option value="5000">5秒</option>
-                        <option value="10000">10秒</option>
-                        <option value="30000">30秒</option>
-                        <option value="60000">1分钟</option>
-                        <option value="300000">5分钟</option>
-                        <option value="600000">10分钟</option>
-                        <option value="1800000">30分钟</option>
-                        <option value="3600000">1小时</option>
-                        <option value="7200000">2小时</option>
-                        <option value="14400000">4小时</option>
-                        <option value="21600000">6小时</option>
-                        <option value="36000000">10小时</option>
-                        <option value="43200000">12小时</option>
-                        <option value="86400000">1天</option>
-                        <option value="259200000">3天</option>
-                        <option value="604800000">1周</option>
-                    </select>
-                </div>
-
-                <div class="filter-group">
-                    <label for="samplingMethod">聚合方法:</label>
-                    <select id="samplingMethod" disabled>
-                        <option value="first">第一个值 (First)</option>
-                        <option value="last">最后一个值 (Last)</option>
-                        <option value="avg">平均值 (Average)</option>
-                        <option value="max">最大值 (Maximum)</option>
-                        <option value="min">最小值 (Minimum)</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="filter-row">
-                <div class="filter-group target-selection">
-                    <label>标靶选择 (可多选):</label>
-                    <div class="target-checkboxes" id="targetCheckboxes">
-                        <div class="info">请先选择设备以加载标靶列表</div>
+                    
+                    <div class="filter-group">
+                        <label>设备名称:</label>
+                        <div id="mainDeviceContainer"></div>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>标靶选择 (可多选):</label>
+                        <div id="mainTargetContainer"></div>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>数据类型 (可多选):</label>
+                        <div id="mainKeyNameContainer"></div>
                     </div>
                 </div>
             </div>
             
-            <div class="filter-row">
-                <div class="time-controls">
+            <!-- 数据过滤区域 -->
+            <div class="control-section">
+                <div class="section-title collapsible-section" onclick="toggleSection('filterSection')">
+                    <span id="filterSectionToggle" style="width: 20px;">▼</span>
+                    <span class="section-icon">🔧</span>
+                    <span>数据过滤选项</span>
+                </div>
+                <div id="filterSection" class="section-content">
+                    <div class="filter-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                        <div class="filter-group">
+                            <label>
+                                <input type="checkbox" id="removeOutliers"> 去除异常数据
+                            </label>
+                            <select id="outlierMethod" disabled style="margin-top: 5px; width: 100%;">
+                                <option value="iqr">IQR方法 (四分位距)</option>
+                                <option value="zscore">Z-Score方法 (标准差)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="filter-group">
+                            <label>
+                                <input type="checkbox" id="enableTimeFilter"> 每日时间段过滤
+                            </label>
+                            <button class="btn" onclick="showTimeRangeModal()" id="configTimeRanges" disabled style="margin-top: 5px; width: 100%;">配置时间段</button>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-row" style="margin-top: 15px;">
+                        <div class="filter-group">
+                            <label>
+                                <input type="checkbox" id="enableCustomFilter"> 自定义数值过滤
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div class="filter-group">
+                            <label for="minValue">最小值:</label>
+                            <input type="number" id="minValue" step="any" placeholder="例如: -1000" disabled>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="maxValue">最大值:</label>
+                            <input type="number" id="maxValue" step="any" placeholder="例如: 1000" disabled>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="excludeValues">排除值:</label>
+                            <input type="text" id="excludeValues" placeholder="例如: 0,999,9999" disabled>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 性能优化区域 -->
+            <div class="control-section">
+                <div class="section-title collapsible-section" onclick="toggleSection('performanceSection')">
+                    <span id="performanceSectionToggle" style="width: 20px;">▼</span>
+                    <span class="section-icon">⚡</span>
+                    <span>性能优化选项</span>
+                </div>
+                <div id="performanceSection" class="section-content">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>
+                                <input type="checkbox" id="enablePerformanceMode"> 启用数据聚合模式
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div class="filter-group">
+                            <label for="dataLimit">数据点限制:</label>
+                            <select id="dataLimit" disabled>
+                                <option value="10000">1万点 (推荐)</option>
+                                <option value="50000">5万点</option>
+                                <option value="100000">10万点</option>
+                                <option value="500000">50万点</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="samplingInterval">聚合时间窗口:</label>
+                            <select id="samplingInterval" disabled>
+                                <option value="">不聚合</option>
+                                <option value="1000">1秒</option>
+                                <option value="5000">5秒</option>
+                                <option value="10000">10秒</option>
+                                <option value="30000">30秒</option>
+                                <option value="60000">1分钟</option>
+                                <option value="300000">5分钟</option>
+                                <option value="600000">10分钟</option>
+                                <option value="1800000">30分钟</option>
+                                <option value="3600000">1小时</option>
+                                <option value="7200000">2小时</option>
+                                <option value="14400000">4小时</option>
+                                <option value="21600000">6小时</option>
+                                <option value="36000000">10小时</option>
+                                <option value="43200000">12小时</option>
+                                <option value="86400000">1天</option>
+                                <option value="259200000">3天</option>
+                                <option value="604800000">1周</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="samplingMethod">聚合方法:</label>
+                            <select id="samplingMethod" disabled>
+                                <option value="first">第一个值 (First)</option>
+                                <option value="last">最后一个值 (Last)</option>
+                                <option value="avg">平均值 (Average)</option>
+                                <option value="max">最大值 (Maximum)</option>
+                                <option value="min">最小值 (Minimum)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            
+            <!-- 时间范围选择 -->
+            <div class="control-section">
+                <div class="section-title">
+                    <span class="section-icon">⏰</span>
+                    <span>时间范围</span>
+                </div>
+                <div class="filter-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                     <div class="filter-group">
                         <label for="startTime">开始时间:</label>
-                        <input type="datetime-local" id="startTime">
+                        <input type="datetime-local" id="startTime" style="width: 100%;">
                     </div>
                     
                     <div class="filter-group">
                         <label for="endTime">结束时间:</label>
-                        <input type="datetime-local" id="endTime">
+                        <input type="datetime-local" id="endTime" style="width: 100%;">
                     </div>
-                    
-                    <button class="btn" onclick="loadData()">查询数据</button>
-                    <button class="btn" onclick="loadDataStream()" style="background-color: #4CAF50;">流式加载</button>
-                    <button class="btn" onclick="clearChart()">清空图表</button>
-                    <button class="btn" onclick="exportToExcel()" id="exportBtn" disabled>导出Excel</button>
-                    <button class="btn" onclick="exportToHTML()" id="exportHTMLBtn" disabled style="background-color: #17a2b8;">导出HTML图表</button>
-                    <button class="btn" onclick="showReferenceValueModal()">设置参考值</button>
-                    <button class="btn" onclick="showDataOperationsModal()">数据操作管理</button>
-<!--                    <button class="btn" onclick="showAnomalyDetectionModal()" style="background-color: #FF6B6B;">异常检测</button>-->
                 </div>
+            </div>
+            
+            <!-- 操作按钮区域 -->
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="loadData()">🔍 查询数据</button>
+                <button class="btn btn-primary" onclick="loadDataStream()">📡 流式加载</button>
+                <button class="btn" onclick="clearChart()">🗑️ 清空图表</button>
+                <button class="btn btn-export" onclick="exportToExcel()" id="exportBtn" disabled>📊 导出Excel</button>
+                <button class="btn btn-export" onclick="exportToHTML()" id="exportHTMLBtn" disabled>📈 导出HTML</button>
+                <button class="btn" onclick="showReferenceValueModal()">📏 设置参考值</button>
+                <button class="btn" onclick="showDataOperationsModal()">⚙️ 数据操作</button>
             </div>
         </div>
         
@@ -656,12 +774,12 @@
 
     <!-- 数据操作管理模态框 -->
     <div id="dataOperationsModal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 900px;">
+        <div class="modal-content modal-content-large">
             <div class="modal-header">
                 <h3>数据操作管理</h3>
                 <span class="close" onclick="hideDataOperationsModal()">&times;</span>
             </div>
-            <div class="modal-body">
+            <div class="modal-body modal-body-scrollable">
                 <div style="margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <div>
@@ -695,23 +813,27 @@
                 
                 <!-- 快速添加操作表单 -->
                 <div id="quickAddForm" style="background: #f0f8ff; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
-                    <h4 style="margin-top: 0; margin-bottom: 10px; font-size: 14px;">快速添加操作</h4>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                        <div id="quickAssetContainer"></div>
-                        <div id="quickDeviceContainer"></div>
-                        <div id="quickTargetContainer"></div>
-                        <div id="quickKeyContainer"></div>
-                    </div>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <select id="quickOperation" style="width: 60px;">
-                            <option value="add">+</option>
-                            <option value="subtract">-</option>
-                            <option value="multiply">×</option>
-                            <option value="divide">÷</option>
-                        </select>
-                        <input type="number" id="quickValue" step="any" placeholder="数值" style="width: 100px;">
-                        <button class="btn btn-primary" onclick="quickAddOperation()" style="padding: 5px 15px;">快速添加</button>
-                        <button class="btn" onclick="toggleAdvancedForm()" style="padding: 5px 10px;">高级选项</button>
+                    <h4 style="margin-top: 0; margin-bottom: 10px; font-size: 14px; cursor: pointer; user-select: none;" onclick="toggleQuickForm()">
+                        <span id="quickFormToggle" style="margin-right: 5px;">▼</span>快速添加/编辑操作
+                    </h4>
+                    <div id="quickFormContent">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                            <div id="quickAssetContainer"></div>
+                            <div id="quickDeviceContainer"></div>
+                            <div id="quickTargetContainer"></div>
+                            <div id="quickKeyContainer"></div>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select id="quickOperation" style="width: 60px;">
+                                <option value="add">+</option>
+                                <option value="subtract">-</option>
+                                <option value="multiply">×</option>
+                                <option value="divide">÷</option>
+                            </select>
+                            <input type="number" id="quickValue" step="any" placeholder="数值" style="width: 100px;">
+                            <button class="btn btn-primary" onclick="quickAddOperation()" style="padding: 5px 15px;">快速添加</button>
+                            <button class="btn" onclick="toggleAdvancedForm()" style="padding: 5px 10px;">高级选项</button>
+                        </div>
                     </div>
                 </div>
                 
@@ -744,8 +866,8 @@
                 </div>
                 
                 <!-- 操作列表 -->
-                <div id="operationsList">
-                    <div style="max-height: 400px; overflow-y: auto;">
+                <div id="operationsList" style="display: flex; flex-direction: column; min-height: 300px;">
+                    <div style="flex: 1; overflow-y: auto; max-height: 350px; min-height: 200px;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
                             <thead>
                                 <tr style="background: #f5f5f5; position: sticky; top: 0; z-index: 10;">

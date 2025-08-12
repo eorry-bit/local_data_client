@@ -4,6 +4,194 @@ let currentData = [];
 let referenceValues = []; // 存储参考值配置
 let timeRanges = []; // 存储时间段配置
 
+// 创建可搜索的多选下拉框
+function createSearchableMultiSelect(containerId, options, selectedValues = [], placeholder, onChangeCallback) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    // 清空容器
+    container.innerHTML = '';
+    container.className = 'searchable-select';
+    
+    // 创建显示输入框
+    const displayInput = document.createElement('div');
+    displayInput.className = 'searchable-select-input';
+    
+    function updateDisplay() {
+        if (selectedValues.length === 0) {
+            displayInput.textContent = placeholder || '请选择...';
+            displayInput.style.color = '#999';
+        } else if (selectedValues.length === 1) {
+            displayInput.textContent = selectedValues[0];
+            displayInput.style.color = '';
+        } else {
+            displayInput.textContent = `已选择 ${selectedValues.length} 项`;
+            displayInput.style.color = '';
+        }
+    }
+    updateDisplay();
+    
+    // 创建下拉箭头
+    const arrow = document.createElement('span');
+    arrow.style.cssText = 'position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none;';
+    arrow.textContent = '▼';
+    displayInput.appendChild(arrow);
+    
+    // 创建下拉面板
+    const dropdown = document.createElement('div');
+    dropdown.className = 'searchable-select-dropdown';
+    
+    // 创建搜索框
+    const searchDiv = document.createElement('div');
+    searchDiv.className = 'searchable-select-search';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = '搜索...';
+    searchDiv.appendChild(searchInput);
+    
+    // 添加全选/取消全选按钮
+    const selectAllDiv = document.createElement('div');
+    selectAllDiv.style.cssText = 'padding: 8px; border-bottom: 1px solid #eee; display: flex; gap: 10px;';
+    
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.textContent = '全选';
+    selectAllBtn.style.cssText = 'padding: 4px 12px; font-size: 12px; cursor: pointer;';
+    selectAllBtn.onclick = function() {
+        selectedValues = [...options];
+        renderOptions(searchInput.value);
+        updateDisplay();
+        if (onChangeCallback) onChangeCallback(selectedValues);
+    };
+    
+    const clearAllBtn = document.createElement('button');
+    clearAllBtn.textContent = '清空';
+    clearAllBtn.style.cssText = 'padding: 4px 12px; font-size: 12px; cursor: pointer;';
+    clearAllBtn.onclick = function() {
+        selectedValues = [];
+        renderOptions(searchInput.value);
+        updateDisplay();
+        if (onChangeCallback) onChangeCallback(selectedValues);
+    };
+    
+    selectAllDiv.appendChild(selectAllBtn);
+    selectAllDiv.appendChild(clearAllBtn);
+    
+    // 创建选项容器
+    const optionsDiv = document.createElement('div');
+    optionsDiv.className = 'searchable-select-options';
+    
+    // 渲染选项
+    function renderOptions(searchTerm = '') {
+        optionsDiv.innerHTML = '';
+        
+        const filteredOptions = options.filter(opt => 
+            opt.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        
+        if (filteredOptions.length === 0) {
+            const noResults = document.createElement('div');
+            noResults.className = 'searchable-select-no-results';
+            noResults.textContent = '没有匹配的选项';
+            optionsDiv.appendChild(noResults);
+            return;
+        }
+        
+        filteredOptions.forEach(opt => {
+            const optionDiv = document.createElement('div');
+            optionDiv.className = 'searchable-select-option';
+            optionDiv.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = selectedValues.includes(opt);
+            checkbox.style.cssText = 'margin: 0;';
+            
+            const label = document.createElement('span');
+            label.textContent = opt;
+            label.style.cssText = 'flex: 1;';
+            
+            optionDiv.appendChild(checkbox);
+            optionDiv.appendChild(label);
+            
+            optionDiv.onclick = function(e) {
+                e.stopPropagation();
+                checkbox.checked = !checkbox.checked;
+                
+                if (checkbox.checked) {
+                    if (!selectedValues.includes(opt)) {
+                        selectedValues.push(opt);
+                    }
+                } else {
+                    const index = selectedValues.indexOf(opt);
+                    if (index > -1) {
+                        selectedValues.splice(index, 1);
+                    }
+                }
+                
+                updateDisplay();
+                if (onChangeCallback) onChangeCallback(selectedValues);
+            };
+            
+            optionsDiv.appendChild(optionDiv);
+        });
+    }
+    
+    // 搜索事件
+    searchInput.oninput = function() {
+        renderOptions(this.value);
+    };
+    
+    // 点击显示/隐藏下拉框
+    displayInput.onclick = function(e) {
+        e.stopPropagation();
+        const isShowing = dropdown.classList.contains('show');
+        
+        // 关闭所有其他下拉框
+        document.querySelectorAll('.searchable-select-dropdown').forEach(d => {
+            d.classList.remove('show');
+        });
+        
+        if (!isShowing) {
+            dropdown.classList.add('show');
+            searchInput.value = '';
+            renderOptions();
+            searchInput.focus();
+        }
+    };
+    
+    // 阻止下拉框内的点击事件冒泡
+    dropdown.onclick = function(e) {
+        e.stopPropagation();
+    };
+    
+    // 点击外部关闭下拉框
+    document.addEventListener('click', function(e) {
+        if (!container.contains(e.target)) {
+            dropdown.classList.remove('show');
+        }
+    });
+    
+    dropdown.appendChild(searchDiv);
+    dropdown.appendChild(selectAllDiv);
+    dropdown.appendChild(optionsDiv);
+    container.appendChild(displayInput);
+    container.appendChild(dropdown);
+    
+    // 初始渲染
+    renderOptions();
+    
+    return {
+        setValues: function(vals) {
+            selectedValues = vals || [];
+            updateDisplay();
+            renderOptions();
+        },
+        getValues: function() {
+            return selectedValues;
+        }
+    };
+}
+
 // 创建可搜索的下拉选择框
 function createSearchableSelect(containerId, options, value, placeholder, onChangeCallback) {
     const container = document.getElementById(containerId);
@@ -145,7 +333,9 @@ function createSearchableSelect(containerId, options, value, placeholder, onChan
 // 存储主界面的可搜索下拉框实例
 let mainSelects = {
     asset: null,
-    device: null
+    device: null,
+    targets: null,  // 多选
+    keyNames: null  // 多选
 };
 
 // 页面加载完成后初始化
@@ -194,10 +384,7 @@ function populateAssetSelect() {
             async function(value) {
                 // 重置设备和标靶
                 if (mainSelects.device) mainSelects.device.setValue('');
-                const targetCheckboxes = document.getElementById('targetCheckboxes');
-                if (targetCheckboxes) {
-                    targetCheckboxes.innerHTML = '<div class="info">请先选择设备以加载标靶列表</div>';
-                }
+                if (mainSelects.targets) mainSelects.targets.setValues([]);
                 
                 // 加载设备列表
                 if (value) {
@@ -211,6 +398,14 @@ function populateAssetSelect() {
                         '请先选择资产...',
                         null
                     );
+                    // 清空标靶列表
+                    mainSelects.targets = createSearchableMultiSelect(
+                        'mainTargetContainer',
+                        [],
+                        [],
+                        '请先选择设备...',
+                        null
+                    );
                 }
             }
         );
@@ -222,6 +417,15 @@ function populateAssetSelect() {
         [],
         '',
         '请先选择资产...',
+        null
+    );
+    
+    // 创建空的标靶多选框
+    mainSelects.targets = createSearchableMultiSelect(
+        'mainTargetContainer',
+        [],
+        [],
+        '请先选择设备...',
         null
     );
 }
@@ -243,9 +447,9 @@ async function loadMainDevices(assetName) {
                     if (value) {
                         await loadMainTargets(assetName, value);
                     } else {
-                        const targetCheckboxes = document.getElementById('targetCheckboxes');
-                        if (targetCheckboxes) {
-                            targetCheckboxes.innerHTML = '<div class="info">请先选择设备以加载标靶列表</div>';
+                        // 清空标靶选择
+                        if (mainSelects.targets) {
+                            mainSelects.targets.setValues([]);
                         }
                     }
                 }
@@ -258,11 +462,6 @@ async function loadMainDevices(assetName) {
 
 // 加载主界面标靶列表
 async function loadMainTargets(assetName, deviceName) {
-    const targetCheckboxes = document.getElementById('targetCheckboxes');
-    if (!targetCheckboxes) return;
-    
-    targetCheckboxes.innerHTML = '<div class="info">正在加载标靶列表...</div>';
-    
     try {
         const response = await fetch(`/api/targets?asset_name=${encodeURIComponent(assetName)}&device_name=${encodeURIComponent(deviceName)}`);
         const result = await response.json();
@@ -271,63 +470,62 @@ async function loadMainTargets(assetName, deviceName) {
             throw new Error(result.error || '获取标靶列表失败');
         }
         
-        targetCheckboxes.innerHTML = '';
-        
         if (result.data.length === 0) {
-            targetCheckboxes.innerHTML = '<div class="info">该设备下没有标靶数据</div>';
+            mainSelects.targets = createSearchableMultiSelect(
+                'mainTargetContainer',
+                [],
+                [],
+                '该设备下没有标靶数据',
+                null
+            );
             return;
         }
         
-        result.data.forEach(target => {
-            const checkboxItem = document.createElement('div');
-            checkboxItem.className = 'checkbox-item';
-            
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.id = `target_${target}`;
-            checkbox.value = target;
-            
-            const label = document.createElement('label');
-            label.htmlFor = `target_${target}`;
-            label.textContent = target;
-            
-            checkboxItem.appendChild(checkbox);
-            checkboxItem.appendChild(label);
-            targetCheckboxes.appendChild(checkboxItem);
-        });
+        // 创建标靶多选下拉框
+        mainSelects.targets = createSearchableMultiSelect(
+            'mainTargetContainer',
+            result.data,
+            [],
+            '请选择标靶...',
+            function(selectedTargets) {
+                // 标靶选择变化时的回调
+                console.log('Selected targets:', selectedTargets);
+            }
+        );
     } catch (error) {
         showError('加载标靶列表失败: ' + error.message);
-        targetCheckboxes.innerHTML = '<div class="error">加载标靶列表失败</div>';
+        mainSelects.targets = createSearchableMultiSelect(
+            'mainTargetContainer',
+            [],
+            [],
+            '加载失败',
+            null
+        );
     }
 }
 
-// 填充数据类型复选框
+// 填充数据类型选择器
 function populateKeyNameSelect() {
-    const keyNameCheckboxes = document.getElementById('keyNameCheckboxes');
-    keyNameCheckboxes.innerHTML = '';
-
-    if (filterOptions.key_names.length === 0) {
-        keyNameCheckboxes.innerHTML = '<div class="info">没有可用的数据类型</div>';
-        return;
+    if (filterOptions.key_names && filterOptions.key_names.length > 0) {
+        mainSelects.keyNames = createSearchableMultiSelect(
+            'mainKeyNameContainer',
+            filterOptions.key_names,
+            [],
+            '请选择数据类型...',
+            function(selectedKeyNames) {
+                // 数据类型选择变化时的回调
+                console.log('Selected key names:', selectedKeyNames);
+            }
+        );
+    } else {
+        mainSelects.keyNames = createSearchableMultiSelect(
+            'mainKeyNameContainer',
+            [],
+            [],
+            '没有可用的数据类型',
+            null
+        );
     }
-
-    filterOptions.key_names.forEach(keyName => {
-        const checkboxItem = document.createElement('div');
-        checkboxItem.className = 'checkbox-item';
-
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.id = `keyname_${keyName}`;
-        checkbox.value = keyName;
-
-        const label = document.createElement('label');
-        label.htmlFor = `keyname_${keyName}`;
-        label.textContent = keyName;
-
-        checkboxItem.appendChild(checkbox);
-        checkboxItem.appendChild(label);
-        keyNameCheckboxes.appendChild(checkboxItem);
-    });
 }
 
 // 设置事件监听器
@@ -484,18 +682,10 @@ async function loadData() {
     const enableTimeFilter = document.getElementById('enableTimeFilter').checked;
     
     // 获取选中的标靶
-    const selectedTargets = [];
-    const targetCheckboxes = document.querySelectorAll('#targetCheckboxes input[type="checkbox"]:checked');
-    targetCheckboxes.forEach(checkbox => {
-        selectedTargets.push(checkbox.value);
-    });
+    const selectedTargets = mainSelects.targets ? mainSelects.targets.getValues() : [];
 
     // 获取选中的数据类型
-    const selectedKeyNames = [];
-    const keyNameCheckboxes = document.querySelectorAll('#keyNameCheckboxes input[type="checkbox"]:checked');
-    keyNameCheckboxes.forEach(checkbox => {
-        selectedKeyNames.push(checkbox.value);
-    });
+    const selectedKeyNames = mainSelects.keyNames ? mainSelects.keyNames.getValues() : [];
     
     // 验证必填字段
     if (!assetName || !deviceName || selectedKeyNames.length === 0 || selectedTargets.length === 0) {
@@ -579,18 +769,9 @@ async function loadDataStream() {
     const enablePerformanceMode = document.getElementById('enablePerformanceMode').checked;
     const dataLimit = document.getElementById('dataLimit').value;
     
-    // 获取选中的标靶和数据类型
-    const selectedTargets = [];
-    const targetCheckboxes = document.querySelectorAll('#targetCheckboxes input[type="checkbox"]:checked');
-    targetCheckboxes.forEach(checkbox => {
-        selectedTargets.push(checkbox.value);
-    });
-    
-    const selectedKeyNames = [];
-    const keyNameCheckboxes = document.querySelectorAll('#keyNameCheckboxes input[type="checkbox"]:checked');
-    keyNameCheckboxes.forEach(checkbox => {
-        selectedKeyNames.push(checkbox.value);
-    });
+    // 获取选中的标靶和数据类型 - 使用新的多选下拉框
+    const selectedTargets = mainSelects.targets ? mainSelects.targets.getValues() : [];
+    const selectedKeyNames = mainSelects.keyNames ? mainSelects.keyNames.getValues() : [];
     
     if (selectedTargets.length === 0 || selectedKeyNames.length === 0) {
         showError('请至少选择一个标靶和一个数据类型');
@@ -2047,6 +2228,34 @@ function hideDataOperationsModal() {
     hideAdvancedForm();
 }
 
+// 切换快速表单的展开/折叠
+function toggleQuickForm() {
+    const content = document.getElementById('quickFormContent');
+    const toggle = document.getElementById('quickFormToggle');
+    
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggle.textContent = '▼';
+    } else {
+        content.style.display = 'none';
+        toggle.textContent = '▶';
+    }
+}
+
+// 切换主界面区域的展开/折叠
+function toggleSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    const toggle = document.getElementById(sectionId + 'Toggle');
+    
+    if (section.style.display === 'none') {
+        section.style.display = 'block';
+        toggle.textContent = '▼';
+    } else {
+        section.style.display = 'none';
+        toggle.textContent = '▶';
+    }
+}
+
 function toggleAdvancedForm() {
     const form = document.getElementById('advancedForm');
     form.style.display = form.style.display === 'none' ? 'block' : 'none';
@@ -2240,8 +2449,9 @@ async function quickAddOperation() {
 
 // 保存高级设置的操作
 async function saveAdvancedOperation() {
-    const targetName = document.getElementById('quickTarget').value;
-    const keyName = document.getElementById('quickKey').value;
+    // 从可搜索下拉框获取值
+    const targetName = quickSelects.target ? quickSelects.target.getValue() : '';
+    const keyName = quickSelects.key ? quickSelects.key.getValue() : '';
     const operationType = document.getElementById('quickOperation').value;
     const value = parseFloat(document.getElementById('quickValue').value);
     
@@ -2413,13 +2623,39 @@ function renderOperationsList() {
 }
 
 // 快速编辑操作
-function quickEditOperation(id) {
+async function quickEditOperation(id) {
     const operation = dataOperations.find(op => op.id === id);
     if (!operation) return;
     
-    // 填充快速编辑表单
-    document.getElementById('quickTarget').value = operation.target_name;
-    document.getElementById('quickKey').value = operation.key_name;
+    // 确保快速表单是展开的
+    const quickFormContent = document.getElementById('quickFormContent');
+    const quickFormToggle = document.getElementById('quickFormToggle');
+    if (quickFormContent && quickFormContent.style.display === 'none') {
+        quickFormContent.style.display = 'block';
+        quickFormToggle.textContent = '▼';
+    }
+    
+    // 先加载资产和设备列表，然后设置值
+    if (operation.asset_name && quickSelects.asset) {
+        quickSelects.asset.setValue(operation.asset_name);
+        // 加载设备列表
+        await loadQuickDevices(operation.asset_name);
+        if (operation.device_name && quickSelects.device) {
+            quickSelects.device.setValue(operation.device_name);
+            // 加载标靶列表
+            await loadQuickTargets(operation.asset_name, operation.device_name);
+        }
+    }
+    
+    // 设置标靶和指标
+    if (quickSelects.target) {
+        quickSelects.target.setValue(operation.target_name);
+    }
+    if (quickSelects.key) {
+        quickSelects.key.setValue(operation.key_name);
+    }
+    
+    // 设置操作类型和值
     document.getElementById('quickOperation').value = operation.operation_type.toLowerCase();
     document.getElementById('quickValue').value = operation.value;
     

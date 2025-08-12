@@ -657,6 +657,43 @@
         </div>
     </div>
 
+    <!-- HTML导出标题编辑模态框 -->
+    <div id="exportHTMLModal" class="modal" style="display: none;">
+        <div class="modal-content" style="width: 600px;">
+            <div class="modal-header">
+                <h2>导出HTML报告设置</h2>
+                <span class="close" onclick="hideExportHTMLModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="filter-group" style="margin-bottom: 20px;">
+                    <label for="chartTitle">图表标题：</label>
+                    <input type="text" id="chartTitle" style="width: 100%; margin-top: 10px;" 
+                           placeholder="请输入自定义标题（留空则使用默认标题）">
+                    <small style="color: #666; display: block; margin-top: 5px;">
+                        默认标题格式：资产名 - 设备名 - [指标列表]
+                    </small>
+                </div>
+                
+                <div class="filter-group" style="margin-bottom: 20px;">
+                    <label for="reportTitle">报告主标题：</label>
+                    <input type="text" id="reportTitle" value="位移数据分析报告"
+                           style="width: 100%; margin-top: 10px;">
+                </div>
+                
+                <div class="filter-group">
+                    <label for="reportDescription">报告描述（可选）：</label>
+                    <textarea id="reportDescription" rows="3" 
+                              style="width: 100%; margin-top: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
+                              placeholder="可以添加一些备注说明..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="confirmExportHTML()" style="background-color: #17a2b8;">确认导出</button>
+                <button class="btn" onclick="hideExportHTMLModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
     <script src="libs/plotly.min.js"></script>
     <script src="libs/xlsx.full.min.js"></script>
     <script src="app.js"></script>

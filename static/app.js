@@ -752,13 +752,37 @@ function formatDateForFilename(date) {
     return `${year}${month}${day}_${hours}${minutes}`;
 }
 
-// 导出HTML功能
-async function exportToHTML() {
+// 显示HTML导出设置模态框
+function exportToHTML() {
     if (currentData.length === 0) {
         showError('没有数据可以导出');
         return;
     }
+    
+    // 生成默认标题
+    const keyNamesList = [...new Set(currentData.map(item => item.key_name))].sort();
+    const keyNamesDisplay = keyNamesList.join(', ');
+    const defaultTitle = `${currentData[0].asset_name} - ${currentData[0].device_name} - [${keyNamesDisplay}]`;
+    
+    // 设置默认值
+    document.getElementById('chartTitle').value = '';
+    document.getElementById('chartTitle').placeholder = defaultTitle;
+    document.getElementById('reportTitle').value = '位移分析报告';
+    document.getElementById('reportDescription').value = '';
+    
+    // 显示模态框
+    document.getElementById('exportHTMLModal').style.display = 'block';
+}
 
+// 隐藏HTML导出模态框
+function hideExportHTMLModal() {
+    document.getElementById('exportHTMLModal').style.display = 'none';
+}
+
+// 确认导出HTML
+async function confirmExportHTML() {
+    hideExportHTMLModal();
+    
     try {
         // 读取本地的Plotly库内容
         showLoading(true);
@@ -844,9 +868,15 @@ async function exportToHTML() {
         
         // 动态生成标题，包含所有选中的数据类型
         const keyNamesDisplay = keyNamesList.join(', ');
+        
+        // 获取用户自定义的标题，如果为空则使用默认标题
+        const customChartTitle = document.getElementById('chartTitle').value.trim();
+        const defaultChartTitle = `${currentData[0].asset_name} - ${currentData[0].device_name} - [${keyNamesDisplay}]`;
+        const chartTitleText = customChartTitle || defaultChartTitle;
+        
         const layout = {
             title: {
-                text: `${currentData[0].asset_name} - ${currentData[0].device_name} - [${keyNamesDisplay}]`,
+                text: chartTitleText,
                 font: { size: 18 }
             },
             xaxis: {
@@ -883,13 +913,17 @@ async function exportToHTML() {
         // 创建数据统计表
         const statsHtml = createHTMLStatsTable(currentData);
 
+        // 获取用户自定义的报告标题和描述
+        const customReportTitle = document.getElementById('reportTitle').value.trim() || '遥测数据分析报告';
+        const reportDescription = document.getElementById('reportDescription').value.trim();
+        
         // 生成HTML内容
         const htmlContent = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>遥测数据分析报告 - ${formatDateForFilename(new Date())}</title>
+    <title>${customReportTitle} - ${formatDateForFilename(new Date())}</title>
     <!-- Plotly库已内嵌，支持完全离线使用 -->
     <script>${plotlyScript}</script>
     <style>
@@ -988,7 +1022,7 @@ async function exportToHTML() {
 <body>
     <div class="container">
         <div class="header">
-            <h1>遥测数据分析报告</h1>
+            <h1>${customReportTitle}</h1>
         </div>
         
         <div class="report-info">
@@ -996,6 +1030,7 @@ async function exportToHTML() {
             <strong>数据点数：</strong>${currentData.length.toLocaleString()} | 
             <strong>资产：</strong>${currentData[0].asset_name} | 
             <strong>设备：</strong>${currentData[0].device_name}
+            ${reportDescription ? `<div style="margin-top: 10px; padding: 10px; background: #e8f4fd; border-radius: 4px;"><strong>备注：</strong>${reportDescription}</div>` : ''}
         </div>
         
         <div class="chart-container">

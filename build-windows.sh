@@ -52,22 +52,35 @@ echo "代理: $http_proxy"
 
 # ==================== 开始编译 ====================
 echo "🔨 开始Windows交叉编译 (强制C++17)..."
+echo "编译主程序..."
 cross build --target x86_64-pc-windows-gnu --release --verbose
 
-if [ $? -eq 0 ]; then
+MAIN_BUILD_RESULT=$?
+
+echo "编译 import_ts_kv 工具..."
+cross build --target x86_64-pc-windows-gnu --release --bin import_ts_kv --verbose
+
+IMPORT_BUILD_RESULT=$?
+
+if [ $MAIN_BUILD_RESULT -eq 0 ] && [ $IMPORT_BUILD_RESULT -eq 0 ]; then
     echo "✅ Windows编译成功！"
-    echo "📁 可执行文件位置: target/x86_64-pc-windows-gnu/release/local_data_client.exe"
+    echo "📁 可执行文件位置:"
+    echo "   - target/x86_64-pc-windows-gnu/release/local_data_client.exe"
+    echo "   - target/x86_64-pc-windows-gnu/release/import_ts_kv.exe"
 
     # 显示文件信息
     ls -la target/x86_64-pc-windows-gnu/release/local_data_client.exe
+    ls -la target/x86_64-pc-windows-gnu/release/import_ts_kv.exe
     file target/x86_64-pc-windows-gnu/release/local_data_client.exe
+    file target/x86_64-pc-windows-gnu/release/import_ts_kv.exe
 
     # ==================== 创建发布包 ====================
     echo "📦 创建Windows发布包..."
-    mkdir -p release/windows/libs
+    mkdir -p release/windows
 
-    # 复制主程序和静态文件
+    # 复制主程序、工具和静态文件
     cp target/x86_64-pc-windows-gnu/release/local_data_client.exe release/windows/
+    cp target/x86_64-pc-windows-gnu/release/import_ts_kv.exe release/windows/
     cp -r static release/windows/
 
     # ==================== 收集所有运行时DLL ====================
@@ -88,21 +101,21 @@ if [ $? -eq 0 ]; then
         "libatomic-1.dll"
     )
 
-    # 复制必需的DLL
-    echo "📋 复制必需的DLL..."
+    # 复制必需的DLL（直接复制到主目录）
+    echo "📋 复制必需的DLL到主目录..."
     for dll_info in "${REQUIRED_DLLS[@]}"; do
         dll_name=$(echo $dll_info | cut -d: -f1)
         dll_path=$(echo $dll_info | cut -d: -f2)
 
         echo "复制 $dll_name..."
         if docker run --rm -v $(pwd):/workspace ghcr.io/cross-rs/x86_64-pc-windows-gnu:main \
-            cp "$dll_path" "/workspace/release/windows/libs/$dll_name" 2>/dev/null; then
+            cp "$dll_path" "/workspace/release/windows/$dll_name" 2>/dev/null; then
             echo "✅ $dll_name 复制成功"
         else
             echo "❌ $dll_name 复制失败，尝试查找..."
             # 尝试查找DLL
             if docker run --rm -v $(pwd):/workspace ghcr.io/cross-rs/x86_64-pc-windows-gnu:main \
-                find /usr -name "$dll_name" -type f -exec cp {} "/workspace/release/windows/libs/" \; 2>/dev/null; then
+                find /usr -name "$dll_name" -type f -exec cp {} "/workspace/release/windows/" \; 2>/dev/null; then
                 echo "✅ $dll_name 通过查找复制成功"
             else
                 echo "❌ $dll_name 未找到"
@@ -110,26 +123,17 @@ if [ $? -eq 0 ]; then
         fi
     done
 
-    # 复制可选的DLL
-    echo "📋 复制可选的DLL..."
+    # 复制可选的DLL（直接复制到主目录）
+    echo "📋 复制可选的DLL到主目录..."
     for dll in "${OPTIONAL_DLLS[@]}"; do
         echo "查找 $dll..."
         if docker run --rm -v $(pwd):/workspace ghcr.io/cross-rs/x86_64-pc-windows-gnu:main \
-            find /usr -name "$dll" -type f -exec cp {} "/workspace/release/windows/libs/" \; 2>/dev/null; then
+            find /usr -name "$dll" -type f -exec cp {} "/workspace/release/windows/" \; 2>/dev/null; then
             echo "✅ $dll 找到并复制"
         else
             echo "⚠️ $dll 未找到 (可选)"
         fi
     done
-
-    # 将所有DLL复制到主目录以确保兼容性
-    echo "📋 将DLL复制到主目录..."
-    if [ -d "release/windows/libs" ] && [ "$(ls -A release/windows/libs)" ]; then
-        cp release/windows/libs/*.dll release/windows/ 2>/dev/null
-        echo "✅ DLL已复制到主目录"
-    else
-        echo "⚠️ libs目录为空或不存在"
-    fi
 
     # ==================== 创建启动脚本 ====================
     echo "📝 创建智能启动脚本..."
@@ -219,6 +223,51 @@ echo Program exited
 pause
 EOF
 
+    # ==================== 创建import_ts_kv.bat脚本 ====================
+    echo "📝 创建import_ts_kv启动脚本..."
+    cat > release/windows/import_ts_kv.bat << 'EOF'
+@echo off
+echo ========================================
+echo   TS_KV Data Import Tool
+echo ========================================
+echo.
+
+REM Get current directory
+set SCRIPT_DIR=%~dp0
+
+REM Check if import_ts_kv.exe exists
+if not exist "%SCRIPT_DIR%import_ts_kv.exe" (
+    echo ERROR: Cannot find import_ts_kv.exe
+    pause
+    exit /b 1
+)
+
+REM Add current directory to PATH for DLLs
+set PATH=%SCRIPT_DIR%;%PATH%
+
+REM Change to script directory
+cd /d "%SCRIPT_DIR%"
+
+REM Check if user provided arguments
+if "%~1"=="" (
+    echo Usage: import_ts_kv.bat import -c ^<csv_file^> [-d ^<database^>]
+    echo.
+    echo Examples:
+    echo   import_ts_kv.bat import -c data.csv
+    echo   import_ts_kv.bat import -c data.csv -d mydb.duckdb
+    echo   import_ts_kv.bat --help
+    echo.
+    import_ts_kv.exe --help
+) else (
+    echo Running: import_ts_kv.exe %*
+    echo.
+    import_ts_kv.exe %*
+)
+
+echo.
+pause
+EOF
+
     # ==================== 创建README ====================
     echo "📖 创建使用说明..."
     cat > release/windows/README.md << 'EOF'
@@ -230,6 +279,7 @@ EOF
 
 ## Package Contents
 - `local_data_client.exe` - Main application (C++17 compiled)
+- `import_ts_kv.exe` - Data import tool for ts_kv table
 - `libstdc++-6.dll` - C++ standard library
 - `libwinpthread-1.dll` - Windows pthread library
 - `libgcc_s_seh-1.dll` - GCC runtime library
@@ -237,9 +287,9 @@ EOF
 - `libquadmath-0.dll` - Quad precision math (optional)
 - `libssp-0.dll` - Stack protection (optional)
 - `libatomic-1.dll` - Atomic operations (optional)
-- `libs/` - Runtime libraries directory
 - `static/` - Web files (with local JS libraries)
 - `start.bat` - Smart startup script
+- `import_ts_kv.bat` - Import tool startup script
 
 ## System Requirements
 - Windows 10/11 x64
@@ -254,6 +304,13 @@ EOF
 - Real-time chart visualization
 - Outlier detection (IQR/Z-Score)
 - Data operations management
+- Incremental data import tool for ts_kv table
+
+## Using the Import Tool
+To import data into ts_kv table:
+1. Prepare your CSV file with columns: entity_id, key, ts, bool_v, str_v, long_v, dbl_v
+2. Run: `import_ts_kv.bat import -c yourfile.csv`
+3. The tool will perform UPSERT operations (insert new or update existing)
 
 ## Troubleshooting
 If DLLs are missing:
@@ -278,12 +335,7 @@ EOF
     # ==================== 显示最终结果 ====================
     echo ""
     echo "📊 Windows发布包内容:"
-    echo "主目录:"
     ls -la release/windows/ | grep -E "\.(exe|dll|bat|md)$" || echo "无相关文件"
-
-    echo ""
-    echo "libs目录:"
-    ls -la release/windows/libs/ 2>/dev/null || echo "libs目录不存在或为空"
 
     echo ""
     echo "📏 发布包大小:"

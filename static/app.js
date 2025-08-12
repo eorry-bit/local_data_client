@@ -515,33 +515,75 @@ function updateChart() {
         return;
     }
     
-    // 按标靶分组数据
+    // 按标靶和数据类型组合分组数据
     const groupedData = {};
+    const allGroupKeys = [];
+    
+    // 先收集所有的组合键，保证颜色分配的一致性
     currentData.forEach(item => {
-        if (!groupedData[item.target_name]) {
-            groupedData[item.target_name] = {
+        const groupKey = `${item.target_name}-${item.key_name}`;
+        if (!allGroupKeys.includes(groupKey)) {
+            allGroupKeys.push(groupKey);
+        }
+    });
+    
+    // 对组合键排序，确保颜色分配稳定
+    allGroupKeys.sort();
+    
+    // 定义颜色调色板（更丰富的颜色）
+    const colorPalette = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+        '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5'
+    ];
+    
+    // 收集所有数据类型用于标题
+    const keyNamesSet = new Set();
+    
+    currentData.forEach(item => {
+        const groupKey = `${item.target_name}-${item.key_name}`;
+        keyNamesSet.add(item.key_name);
+        
+        if (!groupedData[groupKey]) {
+            // 每个组合使用不同的颜色
+            const colorIndex = allGroupKeys.indexOf(groupKey);
+            const color = colorPalette[colorIndex % colorPalette.length];
+            
+            groupedData[groupKey] = {
                 x: [],
                 y: [],
-                name: item.target_name,
+                name: `${item.target_name} (${item.key_name})`,
                 type: 'scatter',
                 mode: 'lines+markers',
-                line: { width: 2 },
-                marker: { size: 4 },
+                line: { 
+                    width: 2,
+                    color: color
+                },
+                marker: { 
+                    size: 4,
+                    color: color
+                },
                 hovertemplate: '<b>%{fullData.name}</b><br>' +
                               '时间: %{x|%Y/%m/%d %H:%M:%S}<br>' +
                               '位移（mm）: %{y}<br>' +
                               '<extra></extra>'
             };
         }
-        groupedData[item.target_name].x.push(new Date(item.timestamp));
-        groupedData[item.target_name].y.push(item.value);
+        groupedData[groupKey].x.push(new Date(item.timestamp));
+        groupedData[groupKey].y.push(item.value);
     });
+    
+    // 转换为数组并排序，用于标题显示
+    const keyNamesList = Array.from(keyNamesSet).sort();
     
     const traces = Object.values(groupedData);
     
+    // 动态生成标题，包含所有选中的数据类型
+    const keyNamesDisplay = keyNamesList.join(', ');
     const layout = {
         title: {
-            text: `${currentData[0].asset_name} - ${currentData[0].device_name} - ${currentData[0].key_name}`,
+            text: `${currentData[0].asset_name} - ${currentData[0].device_name} - [${keyNamesDisplay}]`,
             font: { size: 18 }
         },
         xaxis: {

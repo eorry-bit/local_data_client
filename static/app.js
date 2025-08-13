@@ -1182,7 +1182,7 @@ async function confirmExportHTML() {
                 groupedData[groupKey] = {
                     x: [],
                     y: [],
-                    name: `${item.target_name} (${item.key_name})`,
+                    name: `${item.target_name}`,
                     type: 'scatter',
                     mode: 'lines+markers',
                     line: { 
@@ -1370,8 +1370,7 @@ async function confirmExportHTML() {
         <div class="report-info">
             <strong>生成时间：</strong>${formatDateForExcel(new Date())} | 
             <strong>数据点数：</strong>${currentData.length.toLocaleString()} | 
-            <strong>资产：</strong>${currentData[0].asset_name} | 
-            <strong>设备：</strong>${currentData[0].device_name}
+            <strong>资产：</strong>${currentData[0].asset_name} |
             ${reportDescription ? `<div style="margin-top: 10px; padding: 10px; background: #e8f4fd; border-radius: 4px;"><strong>备注：</strong>${reportDescription}</div>` : ''}
         </div>
         
